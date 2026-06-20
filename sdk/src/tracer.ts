@@ -14,11 +14,13 @@ export class Tracer {
   private readonly apiUrl: string;
   private readonly apiKey: string;
   readonly runId: string;
+  readonly projectId: number | undefined;
 
   constructor(config: TraceConfig) {
     this.apiUrl = (config.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, '');
     this.apiKey = config.apiKey;
     this.runId = config.runId ?? uuid();
+    this.projectId = config.projectId;
   }
 
   ingest(payload: TracePayload): void {

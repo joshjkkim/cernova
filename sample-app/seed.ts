@@ -35,10 +35,10 @@ interface TracePayload {
   output_tokens: number;
   total_tokens: number;
   latency_ms: number;
-  cost_usd: number;
-  context_limit: number;
-  context_utilization: number;
-  status: 'success' | 'error';
+  cost: number;
+  status_success: boolean;
+  output_code?: string;
+  project_id?: number;
   error?: string;
 }
 
@@ -80,10 +80,9 @@ function makeNormal(runId: string, step: typeof STEPS[number]): TracePayload {
     output_tokens,
     total_tokens,
     latency_ms: randInt(...step.latencyRange),
-    cost_usd: getCost(step.model, input_tokens, output_tokens),
-    context_limit: CONTEXT_WINDOW,
-    context_utilization: total_tokens / CONTEXT_WINDOW,
-    status: 'success',
+    cost: getCost(step.model, input_tokens, output_tokens),
+    status_success: true,
+    output_code: `Sample output for ${step.name}`,
   };
 }
 
@@ -104,10 +103,9 @@ function makeAnomalous(runId: string, step: typeof STEPS[number]): TracePayload 
     output_tokens,
     total_tokens,
     latency_ms: randInt(...step.latencyRange) * mul,
-    cost_usd: getCost(step.model, input_tokens, output_tokens),
-    context_limit: CONTEXT_WINDOW,
-    context_utilization: total_tokens / CONTEXT_WINDOW,
-    status: 'success',
+    cost: getCost(step.model, input_tokens, output_tokens),
+    status_success: true,
+    output_code: `Anomalous output for ${step.name}`,
   };
 }
 
@@ -121,10 +119,8 @@ function makeError(runId: string, step: typeof STEPS[number]): TracePayload {
     output_tokens: 0,
     total_tokens: 0,
     latency_ms: randInt(100, 300),
-    cost_usd: 0,
-    context_limit: CONTEXT_WINDOW,
-    context_utilization: 0,
-    status: 'error',
+    cost: 0,
+    status_success: false,
     error: 'rate_limit_exceeded: Too many requests',
   };
 }

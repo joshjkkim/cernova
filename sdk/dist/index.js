@@ -43,17 +43,19 @@ function getCost(model, inputTokens, outputTokens) {
   if (!pricing) return 0;
   return inputTokens / 1e6 * pricing.inputPer1M + outputTokens / 1e6 * pricing.outputPer1M;
 }
-function getContextWindow(model) {
-  return PRICING[model]?.contextWindow;
-}
 
 // src/wrappers/anthropic.ts
+function extractOutputCode(response) {
+  const text = response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+  return text.length > 0 ? text : void 0;
+}
 function wrapAnthropic(client, tracer) {
   return {
     messages: {
       async create(params) {
         const { _trace, ...cleanParams } = params;
         const stepName = _trace?.stepName ?? "anthropic.messages.create";
+        const projectId = _trace?.projectId ?? tracer.projectId;
         const start = Date.now();
         try {
           const response = await client.messages.create(
@@ -64,7 +66,6 @@ function wrapAnthropic(client, tracer) {
           const output_tokens = response.usage?.output_tokens ?? 0;
           const total_tokens = input_tokens + output_tokens;
           const model = response.model ?? cleanParams.model;
-          const contextWindow = getContextWindow(model);
           tracer.ingest({
             run_id: tracer.runId,
             step_name: stepName,
@@ -74,10 +75,10 @@ function wrapAnthropic(client, tracer) {
             output_tokens,
             total_tokens,
             latency_ms,
-            cost_usd: getCost(model, input_tokens, output_tokens),
-            context_limit: contextWindow,
-            context_utilization: contextWindow ? total_tokens / contextWindow : void 0,
-            status: "success"
+            cost: getCost(model, input_tokens, output_tokens),
+            status_success: true,
+            output_code: extractOutputCode(response),
+            project_id: projectId
           });
           return response;
         } catch (err) {
@@ -92,8 +93,9 @@ function wrapAnthropic(client, tracer) {
             output_tokens: 0,
             total_tokens: 0,
             latency_ms,
-            cost_usd: 0,
-            status: "error",
+            cost: 0,
+            status_success: false,
+            project_id: projectId,
             error: message
           });
           throw err;
@@ -116,6 +118,7 @@ var Tracer = class {
     this.apiUrl = (config.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
     this.apiKey = config.apiKey;
     this.runId = config.runId ?? uuid();
+    this.projectId = config.projectId;
   }
   ingest(payload) {
     fetch(`${this.apiUrl}/ingest`, {

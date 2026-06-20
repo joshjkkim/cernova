@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 
 interface Call {
-  id: string;
+  id: string | number;
   run_id?: string;
   step_name?: string;
   model?: string;
@@ -12,8 +12,10 @@ interface Call {
   output_tokens?: number;
   total_tokens?: number;
   latency_ms?: number;
-  cost_usd?: number;
-  status?: string;
+  cost?: number;
+  status_success?: boolean;
+  output_code?: string;
+  project_id?: number;
   error?: string;
   created_at?: string;
   [key: string]: unknown;
@@ -81,7 +83,7 @@ export default function CallsFeed() {
 }
 
 function CallRow({ call }: { call: Call }) {
-  const isError = call.status === 'error';
+  const isError = call.status_success === false;
 
   return (
     <div className={[
@@ -98,7 +100,7 @@ function CallRow({ call }: { call: Call }) {
             'text-[10px] font-semibold px-1.5 py-0.5 rounded uppercase tracking-wider',
             isError ? 'bg-red-800 text-red-200' : 'bg-green-900 text-green-300',
           ].join(' ')}>
-            {call.status ?? 'unknown'}
+            {isError ? 'error' : 'ok'}
           </span>
           <span className="text-gray-200 font-semibold">{call.step_name ?? '—'}</span>
           <span className="text-gray-500">{call.model ?? ''}</span>
@@ -118,10 +120,10 @@ function CallRow({ call }: { call: Call }) {
               <span className="text-gray-600">total </span>
               {call.total_tokens ?? 0}
             </span>
-            {call.cost_usd != null && (
+            {call.cost != null && (
               <span>
                 <span className="text-gray-600">cost </span>
-                ${Number(call.cost_usd).toFixed(6)}
+                ${Number(call.cost).toFixed(6)}
               </span>
             )}
           </div>

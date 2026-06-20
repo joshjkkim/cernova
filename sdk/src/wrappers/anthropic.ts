@@ -4,9 +4,8 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import type { Tracer } from '../tracer';
 import type { TraceOptions } from '../types';
-import { getCost, getContextWindow } from '../cost';
+import { getCost } from '../cost';
 
-// Structural interface so consumers don't need the exact same @anthropic-ai/sdk install
 export interface AnthropicClientLike {
   messages: {
     create(params: MessageCreateParamsNonStreaming, options?: unknown): Promise<Message>;
@@ -25,25 +24,33 @@ export interface TracedAnthropic {
   messages: TracedAnthropicMessages;
 }
 
+function extractOutputCode(response: Message): string | undefined {
+  const text = response.content
+    .filter((b) => b.type === 'text')
+    .map((b) => (b as { type: 'text'; text: string }).text)
+    .join('');
+  return text.length > 0 ? text : undefined;
+}
+
 export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): TracedAnthropic {
   return {
     messages: {
       async create(params: TracedMessageParams): Promise<Message> {
         const { _trace, ...cleanParams } = params;
-        const stepName = _trace?.stepName ?? 'anthropic.messages.create';
-        const start = Date.now();
+        const stepName  = _trace?.stepName  ?? 'anthropic.messages.create';
+        const projectId = _trace?.projectId ?? tracer.projectId;
+        const start     = Date.now();
 
         try {
           const response = await client.messages.create(
             cleanParams as MessageCreateParamsNonStreaming,
           );
 
-          const latency_ms = Date.now() - start;
-          const input_tokens = response.usage?.input_tokens ?? 0;
+          const latency_ms    = Date.now() - start;
+          const input_tokens  = response.usage?.input_tokens  ?? 0;
           const output_tokens = response.usage?.output_tokens ?? 0;
-          const total_tokens = input_tokens + output_tokens;
-          const model = response.model ?? cleanParams.model;
-          const contextWindow = getContextWindow(model);
+          const total_tokens  = input_tokens + output_tokens;
+          const model         = response.model ?? cleanParams.model;
 
           tracer.ingest({
             run_id: tracer.runId,
@@ -54,10 +61,10 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
             output_tokens,
             total_tokens,
             latency_ms,
-            cost_usd: getCost(model, input_tokens, output_tokens),
-            context_limit: contextWindow,
-            context_utilization: contextWindow ? total_tokens / contextWindow : undefined,
-            status: 'success',
+            cost: getCost(model, input_tokens, output_tokens),
+            status_success: true,
+            output_code: extractOutputCode(response),
+            project_id: projectId,
           });
 
           return response;
@@ -74,8 +81,9 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
             output_tokens: 0,
             total_tokens: 0,
             latency_ms,
-            cost_usd: 0,
-            status: 'error',
+            cost: 0,
+            status_success: false,
+            project_id: projectId,
             error: message,
           });
 

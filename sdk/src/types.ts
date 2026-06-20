@@ -1,10 +1,12 @@
 export interface TraceOptions {
   stepName?: string;
+  projectId?: number;
 }
 
 export interface TraceConfig {
   apiKey: string;
   runId?: string;
+  projectId?: number;
   /** Override the ingest endpoint. Defaults to trace-ai's servers. For local dev only. */
   apiUrl?: string;
 }
@@ -18,9 +20,9 @@ export interface TracePayload {
   output_tokens: number;
   total_tokens: number;
   latency_ms: number;
-  cost_usd: number;
-  context_limit?: number;
-  context_utilization?: number;
-  status: 'success' | 'error';
+  cost: number;
+  status_success: boolean;
+  output_code?: string;
+  project_id?: number;
   error?: string;
 }

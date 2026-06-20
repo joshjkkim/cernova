@@ -1,54 +1,113 @@
 # trace.ai
 
-Datadog + Sentry for AI workflows. Wraps LLM calls to capture tokens, latency, and cost in real time, detects anomalies statistically and via ML, and surfaces root-cause diagnoses on a live dashboard.
-
-See [ANOMALY_COPILOT.md](./ANOMALY_COPILOT.md) for the full architecture and hackathon build plan.
-
----
+Datadog + Sentry for AI workflows. Wraps LLM calls to capture tokens, latency, and cost in real time, streams traces to a FastAPI backend, and displays them live on a Next.js dashboard.
 
 ## Repo layout
 
 | Directory | What it is |
 |---|---|
-| `sdk/` | TypeScript tracing SDK — `npm install @trace-ai/sdk` |
-| `sample-app/` | End-to-end demo that runs a traced Anthropic workflow locally |
-| `backend/` | FastAPI ingest API + anomaly engine + scheduler *(coming)* |
-| `frontend/` | Next.js dashboard *(coming)* |
-| `supabase/` | SQL migrations + seed script *(coming)* |
+| `sdk/` | TypeScript tracing SDK (`@trace-ai/sdk`) |
+| `backend/` | FastAPI ingest API + Supabase integration |
+| `frontend/` | Next.js live dashboard (Supabase Realtime) |
+| `sample-app/` | End-to-end demo using the SDK against the real backend |
 
 ---
 
-## Quickstart (SDK)
+## Prerequisites
+
+- Node.js 18+
+- Python 3.11+
+- A [Supabase](https://supabase.com) project with a `CALLS` table
+- An Anthropic API key (for the demo)
+
+---
+
+## One-time setup
+
+### 1. Backend
 
 ```bash
-npm install @trace-ai/sdk
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r ../requirements.txt
+cp .env.example .env
 ```
 
-```typescript
-import Anthropic from '@anthropic-ai/sdk';
-import { Tracer } from '@trace-ai/sdk';
+Edit `backend/.env`:
 
-const tracer = new Tracer({ apiKey: process.env.TRACE_API_KEY! });
-const anthropic = tracer.wrapAnthropic(new Anthropic());
-
-const response = await anthropic.messages.create({
-  model: 'claude-haiku-4-5-20251001',
-  max_tokens: 256,
-  messages: [{ role: 'user', content: 'Hello!' }],
-  _trace: { stepName: 'my-step' },
-});
+```env
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_KEY=eyJ...   # Settings → API → service_role key
 ```
 
-See [`sdk/README.md`](./sdk/README.md) for the full API reference.
+### 2. Frontend
 
----
+```bash
+cd frontend
+npm install
+cp .env.local.example .env.local
+```
 
-## Running the demo
+Edit `frontend/.env.local`:
+
+```env
+NEXT_PUBLIC_SUPABASE_URL=https://<project-ref>.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...   # Settings → API → anon key
+```
+
+### 3. SDK (build once, or after any change to sdk/src/)
+
+```bash
+cd sdk
+npm install
+npm run build
+```
+
+### 4. Sample app
 
 ```bash
 cd sample-app
-cp .env.local.example .env.local   # add ANTHROPIC_API_KEY
-npm install && npm run demo
+npm install
+cp .env.local.example .env.local
 ```
 
-See [`sample-app/README.md`](./sample-app/README.md) for expected output and troubleshooting.
+Edit `sample-app/.env.local`:
+
+```env
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## Running everything
+
+All commands run from the **repo root**:
+
+```bash
+# Terminal 1 — FastAPI backend on :8000
+npm run backend
+
+# Terminal 2 — Next.js dashboard on :3000
+npm run frontend
+
+# Terminal 3 — SDK demo (real Anthropic calls → backend → Supabase → dashboard)
+npm run demo
+
+# Or seed the CALLS table with synthetic data
+npm run seed
+```
+
+---
+
+## How it works
+
+```
+Your app
+  └─ @trace-ai/sdk (wrapAnthropic)
+       ├─ calls Anthropic normally → returns response unchanged
+       └─ fire-and-forget POST /ingest → FastAPI backend
+                                              └─ Supabase INSERT into CALLS
+                                                      └─ Realtime → Next.js dashboard
+```
+
+Every `messages.create` call is intercepted, wall-clock latency is measured, token usage and cost are extracted from the response, and a trace payload is sent to `/ingest` without blocking the caller.

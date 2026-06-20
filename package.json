@@ -1,0 +1,10 @@
+{
+  "name": "trace-ai",
+  "private": true,
+  "scripts": {
+    "backend":  "cd backend && .venv/bin/uvicorn main:app --reload --port 8000",
+    "frontend": "cd frontend && npm run dev",
+    "demo":     "cd sample-app && INGEST_URL=http://localhost:8000 npm run demo",
+    "seed":     "cd sample-app && INGEST_URL=http://localhost:8000 npm run seed"
+  }
+}
