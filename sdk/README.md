@@ -1,5 +1,6 @@
 # @trace-ai/sdk
 
+<<<<<<< HEAD
 TypeScript SDK for [trace.ai](https://trace-ai.com) — wraps LLM client calls to automatically capture tokens, latency, cost, and context utilisation, then streams traces to the trace.ai backend for anomaly detection.
 
 ---
@@ -184,10 +185,16 @@ ANTHROPIC_API_KEY=sk-ant-...
 ---
 
 ## Development (contributing to the SDK)
+=======
+TypeScript SDK that wraps your Anthropic (Claude) client, captures tokens, latency, and cost per call, and POSTs traces to your ingest endpoint.
+
+## Install (local dev)
+>>>>>>> jayden_branch
 
 ```bash
 cd sdk
 npm install
+<<<<<<< HEAD
 npm run build      # compile src/ → dist/
 npm run dev        # watch mode — rebuilds on save
 npm run typecheck  # tsc --noEmit, no output = clean
@@ -232,3 +239,39 @@ sample-app/
 3. Return a plain object matching the provider's method signatures, intercepting the create call the same way `anthropic.ts` does
 4. Add a `wrap<Provider>` method to `Tracer` in `tracer.ts`
 5. Export the new types from `index.ts`
+=======
+npm run build
+```
+
+## Usage
+
+```ts
+import Anthropic from '@anthropic-ai/sdk';
+import { Tracer } from '@trace-ai/sdk';
+
+const tracer = new Tracer({
+  apiKey: process.env.TRACE_API_KEY!,
+  apiUrl: process.env.INGEST_URL ?? 'http://localhost:8000', // local dev
+});
+
+const anthropic = tracer.wrapAnthropic(
+  new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY! }),
+);
+
+// Use the wrapped client exactly like the normal Anthropic client.
+// Each call is traced and POSTed to `${apiUrl}/ingest`.
+const res = await anthropic.messages.create({
+  model: 'claude-sonnet-4-6',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Write a palindrome checker in Python.' }],
+});
+
+console.log(res);
+```
+
+## Scripts
+
+- `npm run build` — bundle to `dist/` with tsup (ESM, CJS, and `.d.ts`)
+- `npm run dev` — rebuild on change
+- `npm run typecheck` — `tsc --noEmit`
+>>>>>>> jayden_branch
