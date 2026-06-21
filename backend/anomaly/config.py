@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 
 class EvalConfig(BaseModel):
-    threshold: float = 50.0
+    threshold: float = 100.0
     # code -> penalty, overrides the registry value for that code when present.
     penalty_overrides: dict[int, float] = Field(default_factory=dict)
 

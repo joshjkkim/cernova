@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from schemas import LayerId
+from .schemas import LayerId
 
 
 @dataclass(frozen=True)
@@ -28,8 +28,8 @@ class ConditionDef:
     if_ref: str           # which if-branch in code (dev reference)
 
 
-# --- L1 hard: deterministic, non-heuristic failures. Each penalty >= default
-# threshold (50) so any single hard hit short-circuits at L1. ---
+# --- L1 hard: deterministic, non-heuristic failures. Each penalty == threshold
+# (100) so any single hard hit short-circuits at L1. ---
 _L1: list[ConditionDef] = [
     ConditionDef(
         1001, "L1_hard", "status_failure", 100.0,

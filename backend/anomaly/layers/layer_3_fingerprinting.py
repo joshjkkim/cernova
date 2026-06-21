@@ -16,10 +16,10 @@ evaluator handles scoring / short-circuiting; this layer only detects.
 
 from __future__ import annotations
 
-from condition_registry import describe
-from config import EvalConfig
-from schemas import CallInput, EvalHit
-from shape_classifier import (
+from ..condition_registry import describe
+from ..config import EvalConfig
+from ..schemas import CallInput, EvalHit
+from ..shape_classifier import (
     classify_shape,
     extract_struct_features,
     infer_expected_shape,

@@ -13,13 +13,13 @@ flag the call.
 
 from __future__ import annotations
 
-from config import EvalConfig
-from layers.layer_1_hard import run_layer_1_hard
-from layers.layer_2_regex import run_layer_2_regex
-from layers.layer_3_fingerprinting import run_layer_3_fingerprinting
-from layers.layer_4_integers import run_layer_4_integers
-from schemas import CallInput, EvalHit, EvalResult, LayerId
-from shape_classifier import classify_shape
+from .config import EvalConfig
+from .layers.layer_1_hard import run_layer_1_hard
+from .layers.layer_2_regex import run_layer_2_regex
+from .layers.layer_3_fingerprinting import run_layer_3_fingerprinting
+from .layers.layer_4_integers import run_layer_4_integers
+from .schemas import CallInput, EvalHit, EvalResult, LayerId
+from .shape_classifier import classify_shape
 
 # Ordered pipeline. (layer_id, runner) — order is the scoring order.
 _LAYERS: list[tuple[LayerId, object]] = [

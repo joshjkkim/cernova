@@ -15,9 +15,9 @@ from __future__ import annotations
 import json
 import re
 
-from condition_registry import describe
-from config import EvalConfig
-from schemas import CallInput, EvalHit
+from ..condition_registry import describe
+from ..config import EvalConfig
+from ..schemas import CallInput, EvalHit
 
 
 def _preview(text: str | None, limit: int = 80) -> str:

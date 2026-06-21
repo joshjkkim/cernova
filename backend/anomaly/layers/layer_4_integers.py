@@ -14,10 +14,10 @@ evaluator handles scoring / short-circuiting; this layer only detects.
 
 from __future__ import annotations
 
-from condition_registry import describe
-from config import EvalConfig
-from schemas import CallInput, EvalHit
-from shape_classifier import infer_expected_shape
+from ..condition_registry import describe
+from ..config import EvalConfig
+from ..schemas import CallInput, EvalHit
+from ..shape_classifier import infer_expected_shape
 
 
 def run_layer_4_integers(payload: CallInput, config: EvalConfig) -> list[EvalHit]:

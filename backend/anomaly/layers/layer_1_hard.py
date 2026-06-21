@@ -13,9 +13,9 @@ detects.
 
 from __future__ import annotations
 
-from condition_registry import describe
-from config import EvalConfig
-from schemas import CallInput, EvalHit
+from ..condition_registry import describe
+from ..config import EvalConfig
+from ..schemas import CallInput, EvalHit
 
 
 def _is_blank(value: str | None) -> bool:

@@ -7,6 +7,8 @@ from services.slack_service import (
     send_error_alert, send_rate_alert,
     RATE_THRESHOLD, RATE_WINDOW,
 )
+from services.anomaly_service import ingest_anomalies
+from anomaly import evaluate_call, CallInput
 from db import get_client
 
 router = APIRouter(tags=["ingest"])
@@ -77,6 +79,25 @@ def _fire_slack(project: dict, payload: IngestPayload) -> None:
         print(f"[ingest] error rate check failed: {exc}")
 
 
+def _run_anomaly_detection(payload: IngestPayload, project_id: int | None) -> None:
+    """Run in a background thread — score the call and persist any anomalies."""
+    try:
+        call_input = CallInput.model_validate(payload.model_dump())
+        result = evaluate_call(call_input)
+        if result.triggered:
+            from schemas.anomaly import AnomalyInput
+            ingest_anomalies(
+                [AnomalyInput(
+                    step_name=payload.step_name,
+                    run_id=payload.run_id,
+                    bad_scores={str(code): int(penalty) for code, penalty in result.error_map.items()},
+                )],
+                project_id,
+            )
+    except Exception as exc:
+        print(f"[ingest] anomaly detection failed for run {payload.run_id}: {exc}")
+
+
 @router.post("/ingest", response_model=IngestResponse)
 def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
     auth = request.headers.get("Authorization", "")
@@ -89,6 +110,9 @@ def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
     payload.project_id = project["id"] if project else None
 
     trace_id = ingest_trace(payload)
+
+    project_id = project["id"] if project else None
+    threading.Thread(target=_run_anomaly_detection, args=(payload, project_id), daemon=True).start()
 
     if project:
         threading.Thread(target=_fire_slack, args=(project, payload), daemon=True).start()

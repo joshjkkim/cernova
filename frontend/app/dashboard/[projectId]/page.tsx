@@ -60,6 +60,15 @@ interface AnomalyRow {
   created_at: string;
 }
 
+interface ConditionInfo {
+  name: string;
+  layer: string;
+  penalty: number;
+  description: string;
+}
+
+type ConditionRegistry = Record<string, ConditionInfo>;
+
 interface AnomalyRun {
   run_id: string;
   total_score: number;
@@ -168,6 +177,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [selectedCall, setSelectedCall]   = useState<Call | null>(null);
   const [anomalies, setAnomalies]         = useState<AnomalyRow[]>([]);
+  const [conditionRegistry, setConditionRegistry] = useState<ConditionRegistry>({});
 
   const runs = useMemo(() => groupIntoRuns(calls), [calls]);
   const selectedRun = useMemo(
@@ -197,12 +207,14 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
       if (Number(proj.owner) !== Number(profile.id)) { setAuthError(true); return; }
       setProject(proj);
 
-      const [callsRes, anomaliesRes] = await Promise.all([
+      const [callsRes, anomaliesRes, registryRes] = await Promise.all([
         fetch(`${BACKEND}/calls/project/${projectId}`),
         fetch(`${BACKEND}/anomalies/project/${proj.id}`),
+        fetch(`${BACKEND}/anomalies/registry`),
       ]);
       if (callsRes.ok) setCalls((await callsRes.json() as Call[]).slice().reverse());
       if (anomaliesRes.ok) setAnomalies(await anomaliesRes.json() as AnomalyRow[]);
+      if (registryRes.ok) setConditionRegistry(await registryRes.json() as ConditionRegistry);
     }
     init();
   }, [projectId, router]);
@@ -347,12 +359,12 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
                 {selectedRun.errorCount > 0 && <span className="text-red-400">{selectedRun.errorCount} error{selectedRun.errorCount > 1 ? 's' : ''}</span>}
               </div>
             </div>
-            <RunGraph steps={selectedRun.steps} anomalyRun={anomalyMap.get(selectedRun.runId)} onSelect={setSelectedCall} />
+            <RunGraph steps={selectedRun.steps} anomalyRun={anomalyMap.get(selectedRun.runId)} registry={conditionRegistry} onSelect={setSelectedCall} />
           </div>
         )}
 
         {/* ── Anomalies ── */}
-        {tab === 'anomalies' && <AnomaliesTab runs={anomalyRuns} />}
+        {tab === 'anomalies' && <AnomaliesTab runs={anomalyRuns} registry={conditionRegistry} />}
 
         {/* ── Settings ── */}
         {tab === 'settings' && <SettingsTab project={project} />}
@@ -641,14 +653,14 @@ function RunCard({ run, anomaly, onClick }: { run: Run; anomaly?: AnomalyRun; on
 
 // ── Run graph ─────────────────────────────────────────────────────────────────
 
-function RunGraph({ steps, anomalyRun, onSelect }: { steps: Call[]; anomalyRun?: AnomalyRun; onSelect: (c: Call) => void }) {
+function RunGraph({ steps, anomalyRun, registry, onSelect }: { steps: Call[]; anomalyRun?: AnomalyRun; registry?: ConditionRegistry; onSelect: (c: Call) => void }) {
   return (
     <div className="flex flex-col items-center w-full">
       {steps.map((step, i) => {
         const anomalyStep = anomalyRun?.steps.find((s) => s.step_name === step.step_name);
         return (
         <div key={step.id} className="flex flex-col items-center w-full max-w-xl">
-          <GraphNode step={step} index={i} anomalyStep={anomalyStep} onSelect={onSelect} />
+          <GraphNode step={step} index={i} anomalyStep={anomalyStep} registry={registry} onSelect={onSelect} />
           {i < steps.length - 1 && (
             <div className="flex flex-col items-center py-1">
               <div className="w-px h-5 bg-gray-700" />
@@ -769,10 +781,11 @@ function CallDetailDrawer({ call, onClose }: { call: Call; onClose: () => void }
 
 type AnomalyStep = AnomalyRun['steps'][number];
 
-function GraphNode({ step, index, anomalyStep, onSelect }: {
+function GraphNode({ step, index, anomalyStep, registry, onSelect }: {
   step: Call;
   index: number;
   anomalyStep?: AnomalyStep;
+  registry?: ConditionRegistry;
   onSelect: (c: Call) => void;
 }) {
   const isError = step.status_success === false;
@@ -813,12 +826,16 @@ function GraphNode({ step, index, anomalyStep, onSelect }: {
           )}
           {anomalyStep && (
             <div className="flex flex-wrap gap-1.5 pt-1">
-              {anomalyStep.codes.map(({ code, score }) => (
-                <span key={code} className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">
-                  <span className="text-gray-400">{code}</span>
-                  <span className={score >= 50 ? 'text-red-400' : 'text-yellow-500'}>+{score}</span>
-                </span>
-              ))}
+              {anomalyStep.codes.map(({ code, score }) => {
+                const info = registry?.[String(code)];
+                return (
+                  <span key={code} title={info?.description} className="inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-800 border border-gray-700">
+                    <span className="text-gray-500">{code}</span>
+                    {info && <span className="text-gray-300">{info.name}</span>}
+                    <span className={score >= 50 ? 'text-red-400' : 'text-yellow-500'}>+{score}</span>
+                  </span>
+                );
+              })}
             </div>
           )}
         </div>
@@ -833,7 +850,7 @@ function GraphNode({ step, index, anomalyStep, onSelect }: {
 
 // ── Anomalies tab ─────────────────────────────────────────────────────────────
 
-function AnomaliesTab({ runs }: { runs: AnomalyRun[] }) {
+function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: ConditionRegistry }) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (runs.length === 0) {
@@ -880,24 +897,45 @@ function AnomaliesTab({ runs }: { runs: AnomalyRun[] }) {
 
             {/* Expanded step breakdown */}
             {isOpen && (
-              <div className="border-t border-gray-800 px-5 py-4 space-y-3">
+              <div className="border-t border-gray-800 px-5 py-4 space-y-4">
                 {run.steps.map((step) => (
-                  <div key={step.step_name} className="flex items-start gap-4">
-                    <span className="text-xs text-gray-500 font-mono w-40 shrink-0 pt-0.5">{step.step_name}</span>
-                    <div className="flex flex-wrap gap-2">
-                      {step.codes.map(({ code, score }) => (
-                        <span
-                          key={code}
-                          className="inline-flex items-center gap-1.5 text-xs font-mono px-2 py-1 rounded-lg bg-gray-900 border border-gray-700"
-                        >
-                          <span className="text-gray-400">{code}</span>
-                          <span className={score >= 50 ? 'text-red-400' : 'text-yellow-500'}>+{score}</span>
-                        </span>
-                      ))}
+                  <div key={step.step_name}>
+                    <div className="text-xs text-gray-500 font-mono mb-2">{step.step_name}</div>
+                    <div className="space-y-2">
+                      {step.codes.map(({ code, score }) => {
+                        const info = registry[String(code)];
+                        return (
+                          <div
+                            key={code}
+                            className="flex items-start gap-3 rounded-lg bg-gray-900/60 border border-gray-800 px-3 py-2"
+                          >
+                            <span className="text-gray-600 font-mono text-[10px] shrink-0 pt-0.5">{code}</span>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-gray-200 text-xs font-semibold">
+                                  {info?.name ?? `code_${code}`}
+                                </span>
+                                <span className={[
+                                  'text-[10px] font-mono font-semibold shrink-0',
+                                  score >= 50 ? 'text-red-400' : 'text-yellow-500',
+                                ].join(' ')}>
+                                  +{score}pts
+                                </span>
+                                {info?.layer && (
+                                  <span className="text-[10px] text-gray-600 font-mono">{info.layer}</span>
+                                )}
+                              </div>
+                              {info?.description && (
+                                <p className="text-gray-500 text-[11px] mt-0.5 leading-relaxed">{info.description}</p>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <span className="ml-auto text-xs text-gray-600 shrink-0 pt-0.5">
-                      {step.codes.reduce((s, c) => s + c.score, 0)} pts
-                    </span>
+                    <div className="text-right text-xs text-gray-600 mt-1">
+                      step total: {step.codes.reduce((s, c) => s + c.score, 0)} pts
+                    </div>
                   </div>
                 ))}
                 <div className="flex justify-end pt-1 border-t border-gray-800 mt-2">

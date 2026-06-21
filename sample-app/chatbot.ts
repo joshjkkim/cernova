@@ -50,89 +50,122 @@ function readBody(req: IncomingMessage): Promise<string> {
 
 interface HistoryItem { role: 'user' | 'assistant'; content: string }
 
-async function triggerError(stepName: string) {
+// L1 hard: status failure + error message → codes 1001+1002 (200pts, critical)
+async function triggerL1Failure(stepName: string) {
   const runId = crypto.randomUUID();
   await tracer.ingest({
-    run_id: runId,
-    step_name: stepName,
-    step_index: 0,
+    run_id: runId, step_name: stepName, step_index: 0,
     model: 'claude-haiku-4-5-20251001',
-    prompt: JSON.stringify({ messages: [{ role: 'user', content: 'test trigger' }] }),
-    input_tokens: 0,
-    output_tokens: 0,
-    total_tokens: 0,
-    latency_ms: 42,
-    cost: 0,
+    prompt: 'Retrieve the user account details.',
+    input_tokens: 15, output_tokens: 0, total_tokens: 15,
+    latency_ms: 230, cost: 0,
     status_success: false,
-    error: 'Simulated error (test trigger)',
+    error: 'Connection timeout after 3 retries',
   });
   return runId;
 }
 
-async function postAnomaly(runId: string, stepName: string, badScores: Record<string, number>) {
-  await fetch(`${INGEST_URL}/anomalies/`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${API_KEY}` },
-    body: JSON.stringify([{ step_name: stepName, run_id: runId, bad_scores: badScores }]),
-  });
-}
-
-async function ingestStep(runId: string, stepName: string, stepIndex: number) {
+// L1 hard: token accounting ghost → code 1007 (100pts, critical)
+// total_tokens doesn't equal input+output — numbers were recorded wrong
+async function triggerL1TokenGhost() {
+  const runId = crypto.randomUUID();
   await tracer.ingest({
-    run_id: runId, step_name: stepName, step_index: stepIndex,
+    run_id: runId, step_name: 'summarize', step_index: 0,
     model: 'claude-haiku-4-5-20251001',
-    prompt: JSON.stringify({ messages: [{ role: 'user', content: `test: ${stepName}` }] }),
-    input_tokens: 10, output_tokens: 5, total_tokens: 15, latency_ms: 80, cost: 0, status_success: true,
+    prompt: 'Summarize this in one sentence.',
+    input_tokens: 10, output_tokens: 5, total_tokens: 99,
+    latency_ms: 180, cost: 0.001,
+    status_success: true,
+    output_code: 'The customer wants a refund.',
   });
-}
-
-// Simulates a run where penalty accumulates across 3 steps, crossing 100pts on the last
-async function triggerBuildup() {
-  const runId = crypto.randomUUID();
-  // Step 1 → 30 pts (warning)
-  await ingestStep(runId, 'classify-intent', 0);
-  await postAnomaly(runId, 'classify-intent', { '2003': 30 });
-  // Step 2 → +40 pts = 70 total (still warning)
-  await ingestStep(runId, 'extract-context', 1);
-  await postAnomaly(runId, 'extract-context', { '3001': 40 });
-  // Step 3 → +35 pts = 105 total (critical!)
-  await ingestStep(runId, 'generate-reply', 2);
-  await postAnomaly(runId, 'generate-reply', { '1002': 35 });
   return runId;
 }
 
-async function triggerAnomaly(critical: boolean) {
+// L2+L3: JSON contract violation + unbalanced bracket + shape mismatch
+// → codes 2001 (50) + 3011 (25) + 3014 (30) = 105pts, critical
+async function triggerL2Json() {
   const runId = crypto.randomUUID();
-  await ingestStep(runId, 'classify-intent', 0);
-  await postAnomaly(runId, 'classify-intent', critical ? { '1001': 100 } : { '2003': 35, '4005': 25 });
-  return { runId, critical };
+  await tracer.ingest({
+    run_id: runId, step_name: 'extract-entities', step_index: 0,
+    model: 'claude-haiku-4-5-20251001',
+    prompt: 'Extract entities and respond in JSON with fields: name, intent, confidence.',
+    input_tokens: 25, output_tokens: 40, total_tokens: 65,
+    latency_ms: 310, cost: 0.0005,
+    status_success: true,
+    output_code: '{"name": "Alice", "intent": "billing", "confidence": 0.92',
+  });
+  return runId;
+}
+
+// L2+L3+L4: classify step returns prose instead of a category
+// → codes 2003 (35) + 3014 (30) + 4005 (25) + 4006 (20) = 110pts, critical
+async function triggerL3Shape() {
+  const runId = crypto.randomUUID();
+  const longOutput = 'Based on my analysis of the support message, I believe the customer is experiencing a billing issue related to their subscription renewal. The message clearly indicates frustration with unexpected charges appearing on their account statement.';
+  await tracer.ingest({
+    run_id: runId, step_name: 'classify-intent', step_index: 0,
+    model: 'claude-haiku-4-5-20251001',
+    prompt: 'Classify this message as exactly one of: billing, technical, general. Reply with just the category.',
+    input_tokens: 20, output_tokens: 60, total_tokens: 80,
+    latency_ms: 400, cost: 0.001,
+    status_success: true,
+    output_code: longOutput,
+  });
+  return runId;
+}
+
+// L4 only: stall pattern — high latency + almost no output
+// → codes 4007 (20) + 4009 (15) = 35pts, warning only (below threshold)
+async function triggerL4Stall() {
+  const runId = crypto.randomUUID();
+  await tracer.ingest({
+    run_id: runId, step_name: 'generate-reply', step_index: 0,
+    model: 'claude-haiku-4-5-20251001',
+    prompt: "Write a detailed response to the customer's billing inquiry.",
+    input_tokens: 50, output_tokens: 3, total_tokens: 53,
+    latency_ms: 9500, cost: 0.0001,
+    status_success: true,
+    output_code: 'ok',
+  });
+  return runId;
 }
 
 async function runWorkflow(message: string, history: HistoryItem[]) {
   // ── Test commands ──
+  // !error — L1 hard: status failure (codes 1001+1002, 200pts, critical)
   if (message.trim() === '!error') {
-    const runId = await triggerError('test-error');
-    return { reply: `Triggered one error call. Check Slack and the dashboard.\nRun: ${runId}`, intent: 'technical', context: '', runId };
+    const runId = await triggerL1Failure('test-error');
+    return { reply: `L1 hard failure: status_success=false + error message.\nCodes: 1001+1002 → 200pts → critical.\nRun: ${runId}`, intent: 'technical', context: '', runId };
   }
 
-  if (message.trim() === '!anomaly') {
-    const { runId } = await triggerAnomaly(true);
-    return { reply: `Triggered critical anomaly (100 pts, threshold hit).\nRun: ${runId}\nCheck the Anomalies tab.`, intent: 'technical', context: '', runId };
+  // !l1 — L1 hard: token accounting ghost (code 1007, 100pts, critical)
+  if (message.trim() === '!l1') {
+    const runId = await triggerL1TokenGhost();
+    return { reply: `L1 token ghost: total_tokens=99 but input(10)+output(5)=15.\nCode: 1007 → 100pts → critical.\nRun: ${runId}`, intent: 'technical', context: '', runId };
   }
 
-  if (message.trim() === '!buildup') {
-    const runId = await triggerBuildup();
-    return { reply: `Triggered 3-step run: 30pts → 70pts → 105pts (critical).\nRun: ${runId}\nCheck Runs + Anomalies tabs.`, intent: 'technical', context: '', runId };
+  // !l2 — L2+L3: JSON contract + bracket imbalance + shape mismatch (105pts, critical)
+  if (message.trim() === '!l2') {
+    const runId = await triggerL2Json();
+    return { reply: `L2+L3 JSON violation: prompt asked for JSON, output is malformed.\nCodes: 2001(50) + 3011(25) + 3014(30) = 105pts → critical.\nRun: ${runId}`, intent: 'technical', context: '', runId };
   }
 
-  if (message.trim() === '!warn') {
-    const { runId } = await triggerAnomaly(false);
-    return { reply: `Triggered warning anomaly (60 pts, below threshold).\nRun: ${runId}\nCheck the Anomalies tab.`, intent: 'technical', context: '', runId };
+  // !l3 — L2+L3+L4: classify step returned prose instead of a category (110pts, critical)
+  if (message.trim() === '!l3') {
+    const runId = await triggerL3Shape();
+    return { reply: `L2+L3+L4 shape mismatch: classify step output is a prose paragraph.\nCodes: 2003(35) + 3014(30) + 4005(25) + 4006(20) = 110pts → critical.\nRun: ${runId}`, intent: 'technical', context: '', runId };
   }
 
+  // !l4 — L4 only: stall pattern, high latency + tiny output (35pts, warning)
+  if (message.trim() === '!l4') {
+    const runId = await triggerL4Stall();
+    return { reply: `L4 stall: 9.5s latency, only 3 output tokens — stall/hang signature.\nCodes: 4007(20) + 4009(15) = 35pts → warning (below threshold).\nRun: ${runId}`, intent: 'technical', context: '', runId };
+  }
+
+  // !spike — fire 6 error calls to trigger the error rate alert
   if (message.trim() === '!spike') {
     const runs = await Promise.all(
-      Array.from({ length: 6 }, (_, i) => triggerError(`spike-error-${i + 1}`))
+      Array.from({ length: 6 }, (_, i) => triggerL1Failure(`spike-error-${i + 1}`))
     );
     return { reply: `Triggered 6 error calls to spike the error rate. Check Slack.\nFirst run: ${runs[0]}`, intent: 'technical', context: '', runId: runs[0] };
   }
@@ -424,11 +457,12 @@ const HTML = /* html */`<!DOCTYPE html>
     <button class="suggestion" onclick="fillInput(this)">My invoice looks wrong</button>
     <button class="suggestion" onclick="fillInput(this)">How do I set up the SDK?</button>
     <button class="suggestion" onclick="fillInput(this)">My API key stopped working</button>
-    <button class="suggestion error-cmd" onclick="fillInput(this)">!error</button>
-    <button class="suggestion error-cmd" onclick="fillInput(this)">!spike</button>
-    <button class="suggestion error-cmd" onclick="fillInput(this)">!anomaly</button>
-    <button class="suggestion error-cmd" onclick="fillInput(this)">!warn</button>
-    <button class="suggestion error-cmd" onclick="fillInput(this)">!buildup</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="L1: status failure → 1001+1002, critical">!error</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="L1: token accounting mismatch → 1007, critical">!l1</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="L2+L3: JSON contract + bracket imbalance → 2001+3011+3014, critical">!l2</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="L2+L3+L4: classify shape mismatch → 2003+3014+4005+4006, critical">!l3</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="L4 only: stall pattern → 4007+4009, warning">!l4</button>
+    <button class="suggestion error-cmd" onclick="fillInput(this)" title="Fire 6 errors to spike the error rate alert">!spike</button>
   </div>
   <div class="input-row">
     <textarea

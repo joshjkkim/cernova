@@ -12,7 +12,7 @@ import json
 import re
 from dataclasses import dataclass, field
 
-from schemas import OutputShape
+from .schemas import OutputShape
 
 
 def classify_shape(text: str | None) -> OutputShape:
