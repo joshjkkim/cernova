@@ -416,7 +416,17 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
       </div>
 
-      {selectedCall && <CallDetailDrawer call={selectedCall} onClose={() => setSelectedCall(null)} />}
+      {selectedCall && (
+        <CallDetailDrawer
+          call={selectedCall}
+          onClose={() => setSelectedCall(null)}
+          anomalyStep={(() => {
+            const ar = anomalyMap.get(selectedCall.run_id ?? '');
+            return ar?.steps.find(s => s.step_name === selectedCall.step_name);
+          })()}
+          registry={conditionRegistry}
+        />
+      )}
     </main>
   );
 }
@@ -726,7 +736,12 @@ interface ParsedPrompt {
   messages?: Array<{ role: string; content: string }>;
 }
 
-function CallDetailDrawer({ call, onClose }: { call: Call; onClose: () => void }) {
+function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
+  call: Call;
+  onClose: () => void;
+  anomalyStep?: AnomalyStep;
+  registry?: ConditionRegistry;
+}) {
   const isError = call.status_success === false;
 
   let parsed: ParsedPrompt = {};
@@ -814,6 +829,42 @@ function CallDetailDrawer({ call, onClose }: { call: Call; onClose: () => void }
               <p className="text-[10px] text-red-500 uppercase tracking-widest mb-2">Error</p>
               <div className="bg-red-950/40 border border-red-800 rounded-lg px-3 py-3 text-xs text-red-300 font-mono leading-relaxed whitespace-pre-wrap">
                 {call.error}
+              </div>
+            </section>
+          )}
+
+          {anomalyStep && anomalyStep.codes.length > 0 && (
+            <section>
+              <div className="flex items-center justify-between mb-2">
+                <p className="text-[10px] text-yellow-600 uppercase tracking-widest">Anomaly conditions</p>
+                <span className="text-[10px] font-mono text-gray-600">
+                  {anomalyStep.codes.reduce((s, c) => s + c.score, 0)} pts total
+                </span>
+              </div>
+              <div className="space-y-2">
+                {anomalyStep.codes.map(({ code, score }) => {
+                  const info = registry?.[String(code)];
+                  const layer = info?.layer ?? '';
+                  const isCritical = score >= 50;
+                  return (
+                    <div key={code} className={[
+                      'rounded-lg border px-3 py-2.5',
+                      isCritical ? 'bg-red-950/30 border-red-800/60' : 'bg-yellow-950/20 border-yellow-800/40',
+                    ].join(' ')}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="text-[10px] font-mono text-gray-600 shrink-0">{code}</span>
+                        <span className={`text-xs font-semibold ${isCritical ? 'text-red-300' : 'text-yellow-300'}`}>
+                          {info?.name ?? `code_${code}`}
+                        </span>
+                        <span className={`text-[10px] font-mono ml-auto shrink-0 ${isCritical ? 'text-red-400' : 'text-yellow-500'}`}>
+                          +{score}pts
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-gray-400 leading-relaxed">{info?.description ?? '—'}</p>
+                      {layer && <p className="text-[10px] text-gray-600 mt-1 font-mono">{layer}</p>}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           )}
