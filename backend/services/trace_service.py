@@ -1,5 +1,6 @@
+from datetime import datetime
 from db import get_client
-from schemas.trace import IngestPayload, TraceRecord
+from schemas.trace import IngestPayload, TraceRecord, WorkflowRun, WorkflowMetrics
 
 
 def ingest_trace(payload: IngestPayload) -> str:
@@ -44,6 +45,80 @@ def get_trace(trace_id: str) -> TraceRecord | None:
     if not res.data:
         return None
     return _row_to_trace(res.data[0])
+
+
+def get_workflow_run(run_id: str) -> WorkflowRun | None:
+    """Fetch all traces for a workflow run and aggregate metrics."""
+    client = get_client()
+    res = (
+        client.table("CALLS")
+        .select("*")
+        .eq("run_id", run_id)
+        .order("created_at", desc=False)
+        .execute()
+    )
+    
+    if not res.data:
+        return None
+    
+    rows = res.data
+    steps = [_row_to_trace(row) for row in rows]
+    
+    # Compute aggregated metrics
+    total_cost = sum(row.get("cost") or 0 for row in rows)
+    total_tokens = sum(row.get("total_tokens") or 0 for row in rows)
+    total_input_tokens = sum(row.get("input_tokens") or 0 for row in rows)
+    total_output_tokens = sum(row.get("output_tokens") or 0 for row in rows)
+    total_reasoning_tokens = sum(row.get("reasoning_tokens") or 0 for row in rows)
+    total_latency_ms = sum(row.get("latency_ms") or 0 for row in rows)
+    error_count = sum(1 for row in rows if not row.get("status_success", True))
+    success_count = len(rows) - error_count
+    step_count = len(rows)
+    
+    # Duration: from first created_at to last created_at
+    created_times = []
+    for row in rows:
+        if row.get("created_at"):
+            ct = row["created_at"]
+            # Parse if it's a string (from Supabase)
+            if isinstance(ct, str):
+                ct = datetime.fromisoformat(ct.replace('Z', '+00:00'))
+            created_times.append(ct)
+    
+    if created_times:
+        created_times.sort()
+        created_at = created_times[0]
+        completed_at = created_times[-1]
+        # Convert to milliseconds for duration
+        duration_ms = int((completed_at - created_at).total_seconds() * 1000)
+    else:
+        created_at = rows[0]["created_at"]
+        completed_at = rows[-1]["created_at"]
+        duration_ms = 0
+    
+    metrics = WorkflowMetrics(
+        total_cost=round(total_cost, 6),
+        total_tokens=total_tokens,
+        total_input_tokens=total_input_tokens,
+        total_output_tokens=total_output_tokens,
+        total_reasoning_tokens=total_reasoning_tokens,
+        total_latency_ms=total_latency_ms,
+        error_count=error_count,
+        success_count=success_count,
+        step_count=step_count,
+        duration_ms=duration_ms,
+    )
+    
+    project_id = rows[0].get("project_id")
+    
+    return WorkflowRun(
+        run_id=run_id,
+        project_id=project_id,
+        steps=steps,
+        metrics=metrics,
+        created_at=created_at,
+        completed_at=completed_at,
+    )
 
 
 def _row_to_trace(row: dict) -> TraceRecord:

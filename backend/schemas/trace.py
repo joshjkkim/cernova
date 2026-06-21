@@ -43,3 +43,27 @@ class TraceRecord(BaseModel):
     output_code: str | None = None
     run_id: str
     project_id: int | None = None
+
+
+# Aggregated metrics for a workflow run
+class WorkflowMetrics(BaseModel):
+    total_cost: float
+    total_tokens: int
+    total_input_tokens: int
+    total_output_tokens: int
+    total_reasoning_tokens: int
+    total_latency_ms: int
+    error_count: int
+    success_count: int
+    step_count: int
+    duration_ms: int  # earliest start to latest end
+
+
+# Complete workflow run with all steps and metrics
+class WorkflowRun(BaseModel):
+    run_id: str
+    project_id: int | None = None
+    steps: list[TraceRecord]
+    metrics: WorkflowMetrics
+    created_at: datetime  # earliest step
+    completed_at: datetime  # latest step
