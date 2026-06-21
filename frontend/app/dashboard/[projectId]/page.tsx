@@ -101,10 +101,9 @@ function groupAnomalies(rows: AnomalyRow[]): AnomalyRun[] {
     if (!step) { step = { step_name: row.step_name, codes: [] }; run.steps.push(step); }
     step.codes.push({ code: row.error_code, score: row.penalty_score });
   }
-  return Array.from(map.values()).sort((a, b) => {
-    if (a.is_critical !== b.is_critical) return a.is_critical ? -1 : 1;
-    return b.total_score - a.total_score;
-  });
+  return Array.from(map.values()).sort((a, b) =>
+    b.latest_at.localeCompare(a.latest_at)
+  );
 }
 type ConnectionStatus = 'connecting' | 'connected' | 'error';
 
@@ -188,6 +187,8 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [conditionRegistry, setConditionRegistry] = useState<ConditionRegistry>({});
   const [analysis, setAnalysis]           = useState<{ runId: string; text: string; costUsd: number } | null>(null);
   const [analyzing, setAnalyzing]         = useState(false);
+  const [logsQuery, setLogsQuery]         = useState('');
+  const [runsQuery, setRunsQuery]         = useState('');
 
   const runs = useMemo(() => groupIntoRuns(calls), [calls]);
   const selectedRun = useMemo(
@@ -353,18 +354,48 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
         {tab === 'overview' && <OverviewTab calls={calls} />}
 
         {/* ── Logs ── */}
-        {tab === 'logs' && (
-          calls.length === 0
+        {tab === 'logs' && (() => {
+          const q = logsQuery.toLowerCase();
+          const filtered = calls.filter(c =>
+            !q ||
+            (c.step_name ?? '').toLowerCase().includes(q) ||
+            (c.model ?? '').toLowerCase().includes(q) ||
+            (c.run_id ?? '').toLowerCase().includes(q) ||
+            (c.error ?? '').toLowerCase().includes(q)
+          );
+          return calls.length === 0
             ? <EmptyState text="No calls yet — run your first trace to see logs here." />
-            : <div className="space-y-2">{calls.map((c) => <CallRow key={`${c.id}`} call={c} anomaly={c.run_id ? anomalyMap.get(c.run_id) : undefined} onSelect={setSelectedCall} />)}</div>
-        )}
+            : (
+              <div>
+                <SearchBar value={logsQuery} onChange={setLogsQuery} placeholder="Filter by step, model, run ID, error…" />
+                {filtered.length === 0
+                  ? <EmptyState text="No calls match that filter." />
+                  : <div className="space-y-2">{filtered.map((c) => <CallRow key={`${c.id}`} call={c} anomaly={c.run_id ? anomalyMap.get(c.run_id) : undefined} onSelect={setSelectedCall} />)}</div>
+                }
+              </div>
+            );
+        })()}
 
         {/* ── Runs ── */}
-        {tab === 'runs' && !selectedRunId && (
-          runs.length === 0
+        {tab === 'runs' && !selectedRunId && (() => {
+          const q = runsQuery.toLowerCase();
+          const filtered = runs.filter(r =>
+            !q ||
+            r.runId.toLowerCase().includes(q) ||
+            r.steps.some(s => (s.step_name ?? '').toLowerCase().includes(q) || (s.model ?? '').toLowerCase().includes(q))
+          );
+          return runs.length === 0
             ? <EmptyState text="No runs yet." />
-            : <div className="space-y-2">{runs.map((r) => <RunCard key={r.runId} run={r} anomaly={anomalyMap.get(r.runId)} onClick={() => setSelectedRunId(r.runId)} />)}</div>
-        )}
+            : (
+              <div>
+                <SearchBar value={runsQuery} onChange={setRunsQuery} placeholder="Filter by run ID, step name, model…" />
+                {filtered.length === 0
+                  ? <EmptyState text="No runs match that filter." />
+                  : <div className="space-y-2">{filtered.map((r) => <RunCard key={r.runId} run={r} anomaly={anomalyMap.get(r.runId)} onClick={() => setSelectedRunId(r.runId)} />)}</div>
+                }
+              </div>
+            );
+        })()}
 
         {/* ── Run detail / graph ── */}
         {tab === 'runs' && selectedRunId && selectedRun && (
@@ -432,6 +463,24 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 }
 
 // ── Overview tab ──────────────────────────────────────────────────────────────
+
+function SearchBar({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="relative mb-4">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-600 text-xs pointer-events-none">⌕</span>
+      <input
+        type="text"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        placeholder={placeholder ?? 'Search…'}
+        className="w-full bg-gray-900 border border-gray-800 rounded-lg pl-7 pr-9 py-2 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600"
+      />
+      {value && (
+        <button onClick={() => onChange('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-600 hover:text-gray-400 text-sm leading-none">×</button>
+      )}
+    </div>
+  );
+}
 
 function OverviewTab({ calls }: { calls: Call[] }) {
   const [range, setRange] = useState<TimeRange>('24h');
@@ -978,6 +1027,7 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
   const [expanded, setExpanded] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<{ runId: string; text: string; costUsd: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
+  const [query, setQuery] = useState('');
 
   async function analyzeRun(runId: string) {
     setAnalyzing(true);
@@ -998,9 +1048,18 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
     return <EmptyState text="No anomalies detected yet." />;
   }
 
+  const q = query.toLowerCase();
+  const filtered = runs.filter(r =>
+    !q ||
+    r.run_id.toLowerCase().includes(q) ||
+    r.steps.some(s => s.step_name.toLowerCase().includes(q))
+  );
+
   return (
     <div className="space-y-3 max-w-3xl">
-      {runs.map((run) => {
+      <SearchBar value={query} onChange={setQuery} placeholder="Filter by run ID or step name…" />
+      {filtered.length === 0 && <EmptyState text="No anomalies match that filter." />}
+      {filtered.map((run) => {
         const isOpen = expanded === run.run_id;
         return (
           <div
