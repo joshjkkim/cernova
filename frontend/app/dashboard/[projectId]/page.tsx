@@ -1059,9 +1059,9 @@ interface ThresholdData {
   calls_needed: number;
   thresholds: { latency_ms_max: number; total_tokens_max: number; cost_max: number };
   baselines?: {
-    latency_ms?: { mean: number; stddev: number };
-    total_tokens?: { mean: number; stddev: number };
-    cost?: { mean: number; stddev: number };
+    latency_ms?: { p50: number; p95: number };
+    total_tokens?: { p50: number; p95: number };
+    cost?: { p50: number; p95: number };
   };
 }
 
@@ -1336,9 +1336,9 @@ function SettingsTab({ project }: { project: Project }) {
                   : `Static defaults active — ${baseline.calls_needed} more calls needed to adapt.`}
               </p>
               {[
-                { label: 'Latency', value: `${baseline.thresholds.latency_ms_max.toLocaleString()}ms`, sub: baseline.baselines?.latency_ms ? `avg ${baseline.baselines.latency_ms.mean.toLocaleString()}ms` : null },
-                { label: 'Tokens', value: baseline.thresholds.total_tokens_max.toLocaleString(), sub: baseline.baselines?.total_tokens ? `avg ${Math.round(baseline.baselines.total_tokens.mean).toLocaleString()}` : null },
-                { label: 'Cost', value: `$${baseline.thresholds.cost_max.toFixed(4)}`, sub: baseline.baselines?.cost ? `avg $${baseline.baselines.cost.mean.toFixed(4)}` : null },
+                { label: 'Latency', value: baseline.thresholds.latency_ms_max != null ? `${baseline.thresholds.latency_ms_max.toLocaleString()}ms` : '—', sub: baseline.baselines?.latency_ms?.p50 != null ? `p50 ${baseline.baselines.latency_ms.p50.toLocaleString()}ms` : null },
+                { label: 'Tokens', value: baseline.thresholds.total_tokens_max != null ? baseline.thresholds.total_tokens_max.toLocaleString() : '—', sub: baseline.baselines?.total_tokens?.p50 != null ? `p50 ${Math.round(baseline.baselines.total_tokens.p50).toLocaleString()}` : null },
+                { label: 'Cost', value: baseline.thresholds.cost_max != null ? `$${baseline.thresholds.cost_max.toFixed(4)}` : '—', sub: baseline.baselines?.cost?.p50 != null ? `p50 $${baseline.baselines.cost.p50.toFixed(4)}` : null },
               ].map(({ label, value, sub }) => (
                 <div key={label} className="flex items-center justify-between text-sm">
                   <span className="text-gray-500">{label}</span>

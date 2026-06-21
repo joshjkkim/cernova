@@ -255,11 +255,14 @@ def get_thresholds(project_id: int) -> dict:
                 "thresholds": static,
             }
 
-        def stats(values: list[float]) -> tuple[float, float]:
-            n = len(values)
-            mean = sum(values) / n
-            stddev = (sum((v - mean) ** 2 for v in values) / n) ** 0.5
-            return mean, stddev
+        def percentile(values: list[float], p: float) -> float:
+            sorted_vals = sorted(values)
+            idx = (len(sorted_vals) - 1) * p
+            lo, hi = int(idx), min(int(idx) + 1, len(sorted_vals) - 1)
+            return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
+
+        def median(values: list[float]) -> float:
+            return percentile(values, 0.5)
 
         latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
         tokens    = [r["total_tokens"] for r in rows if r.get("total_tokens") is not None]
@@ -269,17 +272,14 @@ def get_thresholds(project_id: int) -> dict:
         baselines  = {}
 
         if latencies:
-            m, s = stats(latencies)
-            thresholds["latency_ms_max"] = round(max(3000.0, m + 2 * s), 1)
-            baselines["latency_ms"] = {"mean": round(m, 1), "stddev": round(s, 1)}
+            thresholds["latency_ms_max"] = round(max(3000.0, percentile(latencies, 0.95)), 1)
+            baselines["latency_ms"] = {"p50": round(median(latencies), 1), "p95": round(percentile(latencies, 0.95), 1)}
         if tokens:
-            m, s = stats(tokens)
-            thresholds["total_tokens_max"] = round(max(1000.0, m + 2 * s), 1)
-            baselines["total_tokens"] = {"mean": round(m, 1), "stddev": round(s, 1)}
+            thresholds["total_tokens_max"] = round(max(1000.0, percentile(tokens, 0.95)), 1)
+            baselines["total_tokens"] = {"p50": round(median(tokens), 1), "p95": round(percentile(tokens, 0.95), 1)}
         if costs:
-            m, s = stats(costs)
-            thresholds["cost_max"] = round(max(0.05, m + 2 * s), 6)
-            baselines["cost"] = {"mean": round(m, 6), "stddev": round(s, 6)}
+            thresholds["cost_max"] = round(max(0.05, percentile(costs, 0.95)), 6)
+            baselines["cost"] = {"p50": round(median(costs), 6), "p95": round(percentile(costs, 0.95), 6)}
 
         return {
             "mode": "dynamic",

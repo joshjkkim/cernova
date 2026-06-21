@@ -148,11 +148,11 @@ def _dynamic_l4_limits(project_id: int) -> dict[str, float] | None:
         if len(rows) < 30:
             return None
 
-        def stats(values: list[float]) -> tuple[float, float]:
-            n = len(values)
-            mean = sum(values) / n
-            stddev = (sum((v - mean) ** 2 for v in values) / n) ** 0.5
-            return mean, stddev
+        def percentile(values: list[float], p: float) -> float:
+            sorted_vals = sorted(values)
+            idx = (len(sorted_vals) - 1) * p
+            lo, hi = int(idx), min(int(idx) + 1, len(sorted_vals) - 1)
+            return sorted_vals[lo] + (sorted_vals[hi] - sorted_vals[lo]) * (idx - lo)
 
         latencies = [r["latency_ms"] for r in rows if r.get("latency_ms") is not None]
         tokens    = [r["total_tokens"] for r in rows if r.get("total_tokens") is not None]
@@ -160,14 +160,11 @@ def _dynamic_l4_limits(project_id: int) -> dict[str, float] | None:
 
         limits: dict[str, float] = {}
         if latencies:
-            m, s = stats(latencies)
-            limits["latency_ms_max"] = max(3000.0, m + 2 * s)
+            limits["latency_ms_max"] = max(3000.0, percentile(latencies, 0.95))
         if tokens:
-            m, s = stats(tokens)
-            limits["total_tokens_max"] = max(1000.0, m + 2 * s)
+            limits["total_tokens_max"] = max(1000.0, percentile(tokens, 0.95))
         if costs:
-            m, s = stats(costs)
-            limits["cost_max"] = max(0.05, m + 2 * s)
+            limits["cost_max"] = max(0.05, percentile(costs, 0.95))
 
         return limits or None
     except Exception as exc:
