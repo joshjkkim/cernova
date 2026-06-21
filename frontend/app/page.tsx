@@ -7,7 +7,10 @@ export default function LandingPage() {
       {/* ── Nav ── */}
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#080808]/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <span className="font-semibold text-white tracking-tight">trace.ai</span>
+          <span className="flex items-center gap-2 font-semibold text-white tracking-tight">
+            <img src="/logo.svg" alt="" className="w-6 h-6" />
+            trace.ai
+          </span>
           <div className="flex items-center gap-6">
             <a href="#features" className="text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Features</a>
             <a href="#integrations" className="text-sm text-gray-400 hover:text-white transition-colors hidden sm:block">Integrations</a>
@@ -359,7 +362,10 @@ export default function LandingPage() {
       {/* ── Footer ── */}
       <footer className="border-t border-white/5 py-10 px-6">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          <span className="font-semibold text-white tracking-tight">trace.ai</span>
+          <span className="flex items-center gap-2 font-semibold text-white tracking-tight">
+            <img src="/logo.svg" alt="" className="w-6 h-6" />
+            trace.ai
+          </span>
           <p className="text-xs text-gray-600">Built for developers who ship AI products.</p>
           <Link href="/login" className="text-sm text-gray-500 hover:text-white transition-colors">Sign in →</Link>
         </div>

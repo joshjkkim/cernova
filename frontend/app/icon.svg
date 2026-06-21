@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="pulse-grad" x1="0" y1="0" x2="64" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0%"   stop-color="#6d28d9" stop-opacity="0.3"/>
+      <stop offset="45%"  stop-color="#c4b5fd"/>
+      <stop offset="100%" stop-color="#6d28d9" stop-opacity="0.3"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Hexagon (flat-top) -->
+  <polygon
+    points="58,32 45,55 19,55 6,32 19,9 45,9"
+    stroke="#7c3aed"
+    stroke-width="2.5"
+    fill="#1e1b4b"
+    fill-opacity="0.5"
+    stroke-linejoin="round"
+  />
+
+  <!-- Pulse / ECG line -->
+  <polyline
+    points="10,32 15,32 19,28 23,42 27,18 31,40 35,32 54,32"
+    stroke="url(#pulse-grad)"
+    stroke-width="2.2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    filter="url(#glow)"
+  />
+
+  <!-- Nodes -->
+  <circle cx="15" cy="32" r="2.5" fill="#7c3aed"/>
+  <circle cx="27" cy="18" r="3.2" fill="#c4b5fd" filter="url(#glow)"/>
+  <circle cx="35" cy="32" r="2.5" fill="#7c3aed"/>
+</svg>

@@ -66,7 +66,8 @@ export default function DocsPage() {
       {/* Nav */}
       <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/5 bg-[#080808]/80 backdrop-blur-md">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
-          <Link href="/" className="font-semibold text-white tracking-tight hover:opacity-80 transition-opacity">
+          <Link href="/" className="flex items-center gap-2 font-semibold text-white tracking-tight hover:opacity-80 transition-opacity">
+            <img src="/logo.svg" alt="" className="w-6 h-6" />
             trace.ai
           </Link>
           <div className="flex items-center gap-6">
