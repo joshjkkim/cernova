@@ -378,6 +378,7 @@ await run.messages.create({
             {[
               { trigger: 'Step error', desc: 'Any call where status_success is false fires an immediate alert with the step name, model, error message, and run ID.' },
               { trigger: 'Error rate spike', desc: 'If more than N% of the last M calls fail, a rate alert fires. Both thresholds are configurable (default: 25% over 20 calls).' },
+              { trigger: 'Budget exceeded', desc: 'When monthly AI analysis spend crosses your configured budget (set in Settings → Monthly budget), a one-time alert fires per hour.' },
             ].map((r) => (
               <div key={r.trigger} className="flex gap-4 rounded-xl border border-white/6 bg-white/2 px-4 py-3">
                 <span className="shrink-0 text-sm font-semibold text-gray-300 w-28">{r.trigger}</span>
@@ -393,16 +394,39 @@ await run.messages.create({
 
           <H3 id="sentry">Sentry</H3>
           <P>
-            Add your Sentry project's DSN and trace.ai fires anomaly events directly into your Sentry issues feed — completely isolated from your backend's own Sentry client. Each anomaly includes the full condition breakdown as tags.
+            Add your Sentry project DSN in Settings and trace.ai sends two types of data to Sentry — completely isolated from your own backend{"'"}s Sentry client:
           </P>
+          <div className="space-y-2 mb-4">
+            {[
+              { trigger: 'Performance transactions', desc: 'Every LLM call becomes a Sentry transaction named after its step. Latency, tokens, cost, and anomaly score appear as measurements. All steps in the same run share a trace_id, so Sentry\'s distributed trace view reconstructs your full pipeline as a waterfall.' },
+              { trigger: 'Anomaly events', desc: 'When a call crosses the anomaly threshold, a separate error event fires into your Sentry issues feed. Repeated failures on the same step fingerprint into one issue rather than spamming.' },
+            ].map((r) => (
+              <div key={r.trigger} className="flex gap-4 rounded-xl border border-white/6 bg-white/2 px-4 py-3">
+                <span className="shrink-0 text-sm font-semibold text-gray-300 w-40">{r.trigger}</span>
+                <span className="text-sm text-gray-400 leading-relaxed">{r.desc}</span>
+              </div>
+            ))}
+          </div>
           <Code>{`// No code needed — paste your DSN in Settings → Integrations
 // DSN format: https://<key>@<org>.ingest.sentry.io/<project>`}</Code>
-          <P>Choose an alert level to control which anomalies reach Sentry:</P>
+          <P>Where to find your data in Sentry:</P>
+          <div className="space-y-2 mb-4">
+            {[
+              { path: 'Explore → Traces', desc: 'All LLM calls as transactions. Click any row to see the span waterfall — root span op:ai.inference, child span op:ai.model.invoke with gen_ai.usage.* attributes.' },
+              { path: 'Issues', desc: 'Anomaly events grouped by step name. Each issue shows the full condition breakdown, anomaly score, and a link to the run.' },
+            ].map((r) => (
+              <div key={r.path} className="flex gap-4 rounded-xl border border-white/6 bg-white/2 px-4 py-3">
+                <span className="shrink-0 text-sm font-semibold text-indigo-300 font-mono text-xs w-40 pt-0.5">{r.path}</span>
+                <span className="text-sm text-gray-400 leading-relaxed">{r.desc}</span>
+              </div>
+            ))}
+          </div>
+          <P>Choose an alert level to control which anomalies reach Sentry Issues (performance transactions always fire when a DSN is set):</P>
           <div className="space-y-2 mb-6">
             {[
-              { level: 'Critical only', desc: 'Fires when total anomaly score ≥ 100 pts (any single L1 condition, or accumulated L2–L4). Shown as error-level in Sentry.' },
-              { level: 'Warning + critical', desc: 'Fires for any anomaly hit, even sub-threshold warnings. Warnings are sent as warning-level events, criticals as errors.' },
-              { level: 'Off', desc: 'Sentry integration disabled. DSN is saved but no events are sent.' },
+              { level: 'Critical only', desc: 'Anomaly events fire when total score ≥ 100 pts (any L1 condition, or accumulated L2–L4). Sent as error-level.' },
+              { level: 'Warning + critical', desc: 'Fires for any anomaly hit, even sub-threshold. Warnings are sent as warning-level, criticals as errors.' },
+              { level: 'Off', desc: 'Disables all Sentry output — both performance transactions and anomaly events. DSN is saved but nothing is sent.' },
             ].map((r) => (
               <div key={r.level} className="flex gap-4 rounded-xl border border-white/6 bg-white/2 px-4 py-3">
                 <span className="shrink-0 text-sm font-semibold text-gray-300 w-36">{r.level}</span>
@@ -411,7 +435,7 @@ await run.messages.create({
             ))}
           </div>
           <Callout type="info">
-            Events are fingerprinted by <code className="font-mono text-xs">step_name</code> — so repeated anomalies on the same step group into one Sentry issue instead of flooding your feed. Tags include <code className="font-mono text-xs">trace_ai.project</code>, <code className="font-mono text-xs">trace_ai.step</code>, <code className="font-mono text-xs">trace_ai.layer</code>, and the full <code className="font-mono text-xs">error_map</code> as extras.
+            Performance spans follow <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-indigo-400 hover:text-indigo-300 underline" target="_blank" rel="noreferrer">OpenTelemetry GenAI semantic conventions</a> — <code className="font-mono text-xs">gen_ai.usage.input_tokens</code>, <code className="font-mono text-xs">gen_ai.usage.output_tokens</code>, <code className="font-mono text-xs">gen_ai.system: &quot;anthropic&quot;</code> — so they are compatible with Sentry{"'"}s native AI monitoring features.
           </Callout>
 
           {/* Bottom CTA */}
