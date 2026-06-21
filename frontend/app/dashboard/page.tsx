@@ -100,12 +100,8 @@ export default function Dashboard() {
             <span className="text-sm text-gray-500">{email}</span>
           </div>
           <div className="flex items-center gap-3">
-            <a
-              href="/docs"
-              className="text-sm text-gray-400 hover:text-white transition-colors"
-            >
-              Docs
-            </a>
+            <a href="/docs" className="text-sm text-gray-400 hover:text-white transition-colors">Docs</a>
+            <a href="/settings" className="text-sm text-gray-400 hover:text-white transition-colors">Settings</a>
             <a
               href="/create-project"
               className="text-sm bg-white text-gray-950 px-3 py-1.5 rounded-lg font-medium hover:bg-gray-100 transition-colors"
