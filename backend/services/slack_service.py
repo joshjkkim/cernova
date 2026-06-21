@@ -1,9 +1,10 @@
 import json
+import os
 import time
 from urllib.request import urlopen, Request as UrlRequest
 from typing import Optional
 
-DASHBOARD_BASE = "http://localhost:3000"
+DASHBOARD_BASE = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:3000")
 
 # Per-project cooldown so a burst of errors doesn't spam the channel
 _rate_cooldown:    dict[int, float] = {}
