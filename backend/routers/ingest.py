@@ -261,13 +261,24 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
         return None
 
 
-def _run_anomaly_detection(payload: IngestPayload, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None) -> None:
+def _run_anomaly_detection(
+    payload: IngestPayload,
+    project: dict | None,
+    step_profile_id: str | None = None,
+    trace_id: str | None = None,
+    *,
+    behavior_vector: list[float] | None = None,
+    system_prompt: str | None = None,
+) -> None:
     """Run in a background thread — score the call and persist any anomalies."""
     try:
         from anomaly.config import EvalConfig
-        call_input = CallInput.model_validate(
-            {**payload.model_dump(), "prompt": _extract_instruction(payload.prompt)}
-        )
+        call_input = CallInput.model_validate({
+            **payload.model_dump(),
+            "prompt": _extract_instruction(payload.prompt),
+            "system_prompt": system_prompt,
+            "behavior_vector": behavior_vector,
+        })
         config = EvalConfig()
         if project:
             mode = project.get("threshold_mode", "dynamic")
@@ -296,6 +307,12 @@ def _run_anomaly_detection(payload: IngestPayload, project: dict | None, step_pr
             if baseline:
                 config = EvalConfig(**{**config.model_dump(), "baseline": baseline})
                 print(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
+
+            from services.behavior_baseline_service import compute_behavior_baseline
+            behavior_baseline = compute_behavior_baseline(step_profile_id, model=payload.model)
+            if behavior_baseline:
+                config = EvalConfig(**{**config.model_dump(), "behavior_baseline": behavior_baseline})
+                print(f"[anomaly] L3 behavior baseline for profile={step_profile_id}: n={behavior_baseline.sample_count}")
         result = evaluate_call(call_input, config)
 
         # Mark the CALLS row so it's excluded from future baselines
@@ -357,11 +374,22 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
     """Fingerprint first to get step_profile_id, then run anomaly detection with it.
     Keeps them in one thread so anomaly detection gets per-step baselines."""
     step_profile_id: str | None = None
+    behavior_vector: list[float] | None = None
+    system_prompt: str | None = None
+    profile_status: str | None = None
 
     if payload.project_id:
         try:
+            from anomaly.prompt_kernel import extract_system_prompt
+            from anomaly.layers.layer_3_behavioral import (
+                build_behavior_vector,
+                classify_goal_type,
+            )
+            from services.embedding_service import embed
             from services.fingerprinter import match_or_create_profile
-            profile_id, _ = match_or_create_profile(
+
+            system_prompt = extract_system_prompt(payload.prompt)
+            profile_id, profile_status = match_or_create_profile(
                 project_id=payload.project_id,
                 step_name=payload.step_name,
                 prompt_json=payload.prompt,
@@ -371,10 +399,35 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
                 get_client().table("CALLS").update(
                     {"step_profile_id": profile_id}
                 ).eq("id", trace_id).execute()
+
+                goal_type = classify_goal_type(system_prompt)
+                if profile_status == "new":
+                    get_client().table("step_profiles").update(
+                        {"goal_type": goal_type}
+                    ).eq("id", profile_id).execute()
+
+                call_input = CallInput.model_validate({
+                    **payload.model_dump(),
+                    "prompt": _extract_instruction(payload.prompt),
+                    "system_prompt": system_prompt,
+                })
+                behavior_vector = build_behavior_vector(
+                    call_input, embed, system_prompt=system_prompt, goal_type=goal_type,
+                )
+                get_client().table("CALLS").update(
+                    {"behavior_vector": behavior_vector}
+                ).eq("id", trace_id).execute()
         except Exception as exc:
             print(f"[fingerprint] failed: {exc}")
 
-    _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id)
+    _run_anomaly_detection(
+        payload,
+        project,
+        step_profile_id=step_profile_id,
+        trace_id=trace_id,
+        behavior_vector=behavior_vector,
+        system_prompt=system_prompt,
+    )
 
 
 @router.post("/ingest", response_model=IngestResponse)

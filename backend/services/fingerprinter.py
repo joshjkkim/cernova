@@ -12,59 +12,13 @@ Three outcomes:
 """
 
 import json
-import threading
-from functools import lru_cache
 
+from anomaly.prompt_kernel import extract_system_prompt
 from db import get_client
+from services.embedding_service import embed
 
-MATCH_THRESHOLD  = 0.92
+MATCH_THRESHOLD = 0.92
 EVOLVED_THRESHOLD = 0.75
-
-# Model is loaded once and reused — ~80MB, loads in ~1s on first call
-@lru_cache(maxsize=1)
-def _get_model():
-    from sentence_transformers import SentenceTransformer
-    return SentenceTransformer("all-MiniLM-L6-v2")
-
-_model_lock = threading.Lock()
-
-
-def _embed(text: str) -> list[float]:
-    with _model_lock:
-        model = _get_model()
-    return model.encode(text, normalize_embeddings=True).tolist()
-
-
-def _extract_kernel(prompt_json: str) -> str:
-    """Pull the stable instruction part out of the prompt JSON.
-
-    Supports two formats:
-      TS SDK:  {"system": "...", "messages": [...]}
-      LangChain/Python: {"messages": [{"role": "system", ...}, ...]}
-    The system prompt is the stable identity of a step; user messages vary per call.
-    """
-    try:
-        obj = json.loads(prompt_json)
-        if isinstance(obj, dict):
-            # TS SDK format — top-level system field
-            if obj.get("system"):
-                return str(obj["system"])[:500]
-            msgs = obj.get("messages", [])
-            # LangChain format — system message inside messages array
-            for msg in msgs:
-                if isinstance(msg, dict) and msg.get("role") == "system":
-                    content = msg.get("content", "")
-                    text = content if isinstance(content, str) else str(content)
-                    return text[:500]
-            # Fallback: first user message
-            for msg in msgs:
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    text = content if isinstance(content, str) else str(content)
-                    return text[:200]
-    except (ValueError, TypeError):
-        pass
-    return prompt_json[:200]
 
 
 def _derive_step_name(prompt_json: str) -> str | None:
@@ -92,15 +46,14 @@ def match_or_create_profile(
     Returns (None, 'error') if anything fails — ingest should continue regardless.
     """
     try:
-        kernel = _extract_kernel(prompt_json)
-        embedding = _embed(kernel)
+        kernel = extract_system_prompt(prompt_json)
+        embedding = embed(kernel)
         db = get_client()
 
-        # pgvector nearest-neighbour search within this project
         result = db.rpc("match_step_profile", {
-            "p_project_id":   project_id,
-            "p_embedding":    embedding,
-            "p_threshold":    EVOLVED_THRESHOLD,
+            "p_project_id": project_id,
+            "p_embedding": embedding,
+            "p_threshold": EVOLVED_THRESHOLD,
         }).execute()
 
         if result.data:
@@ -118,14 +71,13 @@ def match_or_create_profile(
             db.table("step_profiles").update(updates).eq("id", profile_id).execute()
             return profile_id, status
 
-        # No match — create new profile
         display_name = step_name if not step_name.startswith("step_") else (
             _derive_step_name(prompt_json) or step_name
         )
         res = db.table("step_profiles").insert({
-            "project_id":  project_id,
+            "project_id": project_id,
             "fingerprint": embedding,
-            "step_name":   display_name,
+            "step_name": display_name,
         }).execute()
 
         profile_id = res.data[0]["id"]

@@ -12,7 +12,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Where a condition lives. Stable strings — also used in EvalResult.stopped_at_layer.
-LayerId = Literal["L1_hard", "L2_format", "L4_integers", "L5_statistical"]
+LayerId = Literal["L1_hard", "L2_format", "L3_behavioral", "L4_integers", "L5_statistical"]
 
 # Coarse shape classification — used by L4 cross-field checks and EvalResult UI fields.
 OutputShape = Literal[
@@ -28,6 +28,14 @@ class CallInput(BaseModel):
     step_name: str
     model: str
     prompt: str = Field(..., description="Exact user prompt string")
+    system_prompt: str | None = Field(
+        default=None,
+        description="Stable system instruction only — used by L3 prompt_embed, not merged user text",
+    )
+    behavior_vector: list[float] | None = Field(
+        default=None,
+        description="Pre-computed 778-d behavior vector from ingest (L3 drift vs centroid)",
+    )
     input_tokens: int | None = None
     output_tokens: int | None = None
     reasoning_tokens: int | None = None
@@ -96,6 +104,14 @@ class MetricStat(BaseModel):
         if val < lo:
             return (val - lo) / iq
         return None
+
+
+class BehaviorBaseline(BaseModel):
+    """Per-step-profile behavioral centroid from recent clean call vectors."""
+
+    sample_count: int
+    centroid: list[float]
+    goal_type: str
 
 
 class StepBaseline(BaseModel):

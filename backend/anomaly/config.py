@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .schemas import StepBaseline
+from .schemas import BehaviorBaseline, StepBaseline
 
 
 class EvalConfig(BaseModel):
@@ -20,6 +20,11 @@ class EvalConfig(BaseModel):
     # cost via IQR Tukey fences against this step's own history, and L4 defers
     # its raw threshold checks (4001/4002/4003) to avoid double-counting.
     baseline: StepBaseline | None = None
+
+    # Per-step behavioral centroid (L3). When present, L3 scores drift via cosine
+    # distance against stored behavior vectors for this step profile.
+    behavior_baseline: BehaviorBaseline | None = None
+    behavior_drift_threshold: float = 0.35
 
     # Tukey fence multiplier k: fence = Q3 + k*IQR (upper) / Q1 - k*IQR (lower).
     # k=2.5 gives ~0.05% false positive rate on normal data; real LLM distributions

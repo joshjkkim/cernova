@@ -5,8 +5,7 @@ flagged at exactly one target layer, so the short-circuit stops there:
 
     L1 — hard failure        (status_success=False)        -> stops at L1_hard
     L2 — JSON contract        (asks JSON, returns prose)     -> stops at L2_format
-    L3 — shape/structure      (asks a number, returns prose  -> stops at L3_fingerprint
-                               with a broken bracket)
+    L3 — behavioral drift     (vector far from centroid)     -> stops at L3_behavioral
     L4 — numeric thresholds   (latency/tokens/cost/ratio)    -> stops at L4_integers
 
 Runnable two ways:
@@ -20,14 +19,19 @@ from __future__ import annotations
 import os
 import sys
 
-# Allow running directly (no install) by putting the package root on sys.path.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import EvalConfig
-from evaluator import evaluate_call
-from schemas import CallInput
+from anomaly.config import EvalConfig
+from anomaly.evaluator import evaluate_call
+from anomaly.schemas import BehaviorBaseline, CallInput
 
 CFG = EvalConfig()
+
+
+def _unit_vector(dim: int, index: int = 0) -> list[float]:
+    vec = [0.0] * dim
+    vec[index] = 1.0
+    return vec
 
 
 # --- scenario builders ----------------------------------------------------
@@ -41,7 +45,7 @@ def clean_call() -> CallInput:
         input_tokens=12, output_tokens=1, reasoning_tokens=0, total_tokens=13,
         latency_ms=140, cost=0.0002,
         status_success=True, error=None, output_code="no",
-        run_id="run_clean", project_id=1,
+        run_id="run_clean", project_id="1",
     )
 
 
@@ -54,7 +58,7 @@ def l1_call() -> CallInput:
         input_tokens=12, output_tokens=1, reasoning_tokens=0, total_tokens=13,
         latency_ms=140, cost=0.0002,
         status_success=False, error=None, output_code="no",
-        run_id="run_l1", project_id=1,
+        run_id="run_l1", project_id="1",
     )
 
 
@@ -68,23 +72,33 @@ def l2_call() -> CallInput:
         latency_ms=320, cost=0.0006,
         status_success=True, error=None,
         output_code="Sure! The name is Bob and the age is 30.",
-        run_id="run_l2", project_id=1,
+        run_id="run_l2", project_id="1",
     )
 
 
 def l3_call() -> CallInput:
-    """Shape + structure anomaly: prompt implies a number, output is prose with
-    an unbalanced brace — fires 3014 (shape mismatch) + 3011 (bracket imbalance).
-    Crucially uses no JSON/enum/yes-no wording, so L2 stays silent."""
+    """Behavioral drift: vector orthogonal to baseline centroid (3010)."""
     return CallInput(
-        step_name="answer-question",
+        step_name="classify-intent",
         model="claude-haiku-4-5",
-        prompt="How many planets are in the solar system? Respond with just a number.",
-        input_tokens=18, output_tokens=14, reasoning_tokens=0, total_tokens=32,
+        prompt="Classify the user message into billing or support.",
+        input_tokens=18, output_tokens=2, reasoning_tokens=0, total_tokens=20,
         latency_ms=300, cost=0.0005,
-        status_success=True, error=None,
-        output_code="There are eight planets, though some lists include {Pluto.",
-        run_id="run_l3", project_id=1,
+        status_success=True, error=None, output_code="billing",
+        run_id="run_l3", project_id="1",
+        behavior_vector=_unit_vector(778, 1),
+    )
+
+
+def l3_config() -> EvalConfig:
+    return EvalConfig(
+        behavior_baseline=BehaviorBaseline(
+            sample_count=25,
+            centroid=_unit_vector(778, 0),
+            goal_type="Extract",
+        ),
+        behavior_drift_threshold=0.35,
+        threshold=35.0,
     )
 
 
@@ -101,7 +115,7 @@ def l4_call() -> CallInput:
         input_tokens=1_000, output_tokens=80_000, reasoning_tokens=0, total_tokens=81_000,
         latency_ms=20_000, cost=3.5,
         status_success=True, error=None, output_code=body,
-        run_id="run_l4", project_id=1,
+        run_id="run_l4", project_id="1",
     )
 
 
@@ -124,37 +138,34 @@ def test_l1_stops_at_hard():
 
 
 def test_l2_stops_at_format():
-    r = evaluate_call(l2_call(), CFG)
+    r = evaluate_call(l2_call(), EvalConfig(threshold=50.0))
     assert r.triggered
     assert r.stopped_at_layer == "L2_format"
     assert 2001 in r.error_map
     assert r.hits[0].step_name == "extract-fields"
-    # Earlier layer (L1) stayed silent.
     assert all(h.layer == "L2_format" for h in r.hits)
 
 
-def test_l3_stops_at_fingerprint():
-    r = evaluate_call(l3_call(), CFG)
+def test_l3_stops_at_behavioral():
+    r = evaluate_call(l3_call(), l3_config())
     assert r.triggered
-    assert r.stopped_at_layer == "L3_fingerprint"
-    assert {3011, 3014} <= set(r.error_map)
-    # L1 + L2 stayed silent.
-    assert all(h.layer == "L3_fingerprint" for h in r.hits)
+    assert r.stopped_at_layer == "L3_behavioral"
+    assert 3010 in r.error_map
+    assert all(h.layer == "L3_behavioral" for h in r.hits)
 
 
 def test_l4_stops_at_integers():
-    r = evaluate_call(l4_call(), CFG)
+    r = evaluate_call(l4_call(), EvalConfig(threshold=55.0))
     assert r.triggered
     assert r.stopped_at_layer == "L4_integers"
     assert {4001, 4002, 4003, 4004} <= set(r.error_map)
-    # L1 + L2 + L3 stayed silent.
     assert all(h.layer == "L4_integers" for h in r.hits)
 
 
 # --- minimal runner so this works without pytest + prints the outputs -----
 
-def _show(title: str, payload: CallInput) -> None:
-    r = evaluate_call(payload, CFG)
+def _show(title: str, payload: CallInput, config: EvalConfig | None = None) -> None:
+    r = evaluate_call(payload, config or CFG)
     print(f"\n=== {title} ===")
     print(f"  triggered        : {r.triggered}")
     print(f"  total_score      : {r.total_score}  (threshold {r.threshold})")
@@ -181,11 +192,10 @@ if __name__ == "__main__":
             print(f"PASS  {t.__name__}")
     print(f"\n{passed}/{len(tests)} passed")
 
-    # Print the full EvalResult for each layer's scenario.
     _show("clean (passes all layers)", clean_call())
     _show("L1 — hard failure", l1_call())
     _show("L2 — JSON contract violation", l2_call())
-    _show("L3 — shape / structure anomaly", l3_call())
+    _show("L3 — behavioral drift", l3_call(), l3_config())
     _show("L4 — numeric thresholds", l4_call())
 
     sys.exit(0 if passed == len(tests) else 1)

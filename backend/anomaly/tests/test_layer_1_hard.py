@@ -13,11 +13,11 @@ import os
 import sys
 
 # Allow running directly (no install) by putting the package root on sys.path.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import EvalConfig
-from layers.layer_1_hard import run_layer_1_hard
-from schemas import CallInput
+from anomaly.config import EvalConfig
+from anomaly.layers.layer_1_hard import run_layer_1_hard
+from anomaly.schemas import CallInput
 
 CFG = EvalConfig()
 
@@ -38,7 +38,7 @@ def _base(**overrides) -> CallInput:
         error=None,
         output_code="no",
         run_id="run_abc",
-        project_id=1,
+        project_id="1",
     )
     data.update(overrides)
     return CallInput(**data)

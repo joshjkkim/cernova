@@ -7,6 +7,7 @@ scattered in the layer files — layers only reference codes via `describe()`.
 Code ranges:
     L1 hard        1001-1099
     L2 format      2001-2099   (regex / contract violations)
+    L3 behavioral  3010-3019   (embedding drift vs step centroid)
     L4 integers    4001-4099   (static thresholds + cross-field)
     L5 statistical 5001-5099   (IQR/log-normal Tukey fence deviations from per-step baseline)
 """
@@ -99,6 +100,16 @@ _L2: list[ConditionDef] = [
     ),
 ]
 
+# --- L3 behavioral: cosine distance from per-step-profile behavior centroid.
+# Requires a BehaviorBaseline (≥20 clean vectors) and behavior_vector on the call. ---
+_L3: list[ConditionDef] = [
+    ConditionDef(
+        3010, "L3_behavioral", "behavior_drift", 35.0,
+        "Call behavior vector drifts from this step's clean-history centroid (semantic + output + metrics).",
+        "layer_3_behavioral.run_layer_3_behavioral:behavior_drift",
+    ),
+]
+
 # --- L4 integers: static numeric limits plus cross-field plausibility. Reads
 # limits / step_limits from EvalConfig and shape hints from shape_classifier.
 # Penalties are individually small — several must fire to cross threshold. ---
@@ -183,7 +194,7 @@ _L5: list[ConditionDef] = [
 ]
 
 CONDITION_REGISTRY: dict[int, ConditionDef] = {
-    c.code: c for c in (*_L1, *_L2, *_L4, *_L5)
+    c.code: c for c in (*_L1, *_L2, *_L3, *_L4, *_L5)
 }
 
 
