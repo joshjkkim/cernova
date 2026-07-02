@@ -1,8 +1,8 @@
 # cernova
 
-Python SDK for [Cernova](https://cernova.dev) — observability for LLM workflows.
+Python SDK for [Cernova](https://cernova.dev) — the detection layer for LLM pipelines.
 
-Automatically captures tokens, latency, cost, and anomaly scores for every LLM call.
+Automatically captures tokens, latency, and cost for every LLM call, and runs per-step anomaly detection to catch silent regressions before your users notice.
 
 ## Installation
 

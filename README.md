@@ -1,6 +1,8 @@
 # Cernova
 
-Datadog + Sentry for AI workflows. Wraps LLM calls to capture tokens, latency, and cost in real time, runs per-step anomaly detection, and displays everything live on a Next.js dashboard.
+The detection layer for LLM pipelines. Cernova watches every step of your AI workflow against its own statistical baseline and tells you when something silently regresses — a prompt change, a model update, cost or latency drift, broken output — before your users notice.
+
+Observability tools log what happened and wait for you to look. Cernova is active: per-step anomaly detection (log-space IQR fences scoped to each step's semantic fingerprint), trend detection, and AI root-cause analysis — with alerts delivered into the tools your team already watches. It complements your existing stack; it doesn't replace it.
 
 ## Repo layout
 
@@ -72,6 +74,25 @@ llm.invoke("Hello!")
 ```
 
 See [`sdk/README.md`](sdk/README.md) and [`python-sdk/README.md`](python-sdk/README.md) for full docs.
+
+---
+
+## Works with your stack
+
+Traces in from what you already run, alerts out to where you already look.
+
+| Integration | Direction | Status |
+|---|---|---|
+| Anthropic SDK (TypeScript) | traces in | ✅ live |
+| OpenAI SDK (TypeScript) | traces in | ✅ live |
+| LangChain (Python — Anthropic, OpenAI, Gemini, any provider) | traces in | ✅ live |
+| Manual ingest (any model, TS + Python) | traces in | ✅ live |
+| Slack | alerts out | ✅ live |
+| Sentry (performance transactions + anomaly issues) | alerts out | ✅ live |
+| OpenTelemetry GenAI ingest | traces in | 🔜 planned |
+| Vercel AI SDK telemetry | traces in | 🔜 planned |
+| Langfuse / LangSmith import (warm-start baselines from existing traces) | traces in | 🔜 planned |
+| Generic webhooks / PagerDuty | alerts out | 🔜 planned |
 
 ---
 

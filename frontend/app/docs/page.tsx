@@ -509,7 +509,7 @@ function SectionDetection() {
 function SectionIntegrations() {
   return (
     <div>
-      <P>Both integrations are configured per-project in <strong className="text-gray-300">Settings</strong> — no code changes needed.</P>
+      <P>Cernova is a detection layer, not another pane of glass — anomalies flow out to the tools your team already watches. Both integrations are configured per-project in <strong className="text-gray-300">Settings</strong> — no code changes needed.</P>
 
       <H2>Slack</H2>
       <P>Paste a Slack <a href="https://api.slack.com/messaging/webhooks" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">Incoming Webhook URL</a> into project settings. Cernova posts alerts when:</P>
@@ -545,6 +545,15 @@ function SectionIntegrations() {
       <Callout type="info">
         Performance spans follow <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenTelemetry GenAI semantic conventions</a> — gen_ai.usage.input_tokens, gen_ai.system: &quot;anthropic&quot; — compatible with Sentry&apos;s native AI monitoring.
       </Callout>
+
+      <H2>On the roadmap</H2>
+      <P>Planned integrations, in rough priority order:</P>
+      <Rows items={[
+        { key: 'OpenTelemetry', label: 'traces in',  color: 'text-gray-400', value: 'OTLP ingest following the GenAI semantic conventions — point any OTel-instrumented app (OpenLLMetry, Traceloop) at Cernova with no SDK change.' },
+        { key: 'Vercel AI SDK', label: 'traces in',  color: 'text-gray-400', value: 'Consume the AI SDK\'s built-in telemetry — one exporter config line, no wrapper.' },
+        { key: 'Langfuse import', label: 'traces in', color: 'text-gray-400', value: 'Upload a Langfuse or LangSmith export to warm per-step baselines in minutes instead of waiting for live traffic.' },
+        { key: 'Webhooks',      label: 'alerts out', color: 'text-gray-400', value: 'Generic webhook destination posting the structured anomaly payload anywhere — PagerDuty, Opsgenie, your own automation.' },
+      ]} />
     </div>
   );
 }

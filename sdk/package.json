@@ -1,7 +1,7 @@
 {
   "name": "@cernova/sdk",
   "version": "0.1.4",
-  "description": "Tracing SDK for AI workflows — wraps LLM clients to capture tokens, latency, and cost",
+  "description": "The detection layer for LLM pipelines — wraps Anthropic and OpenAI clients to capture tokens, latency, and cost, with per-step anomaly detection",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "cernova"
 version = "0.1.0"
-description = "Observability for LLM workflows — tokens, latency, cost, and anomaly detection"
+description = "The detection layer for LLM pipelines — per-step anomaly detection on tokens, latency, and cost"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }

@@ -1,6 +1,6 @@
 # @cernova/sdk
 
-Observability for AI workflows. Wraps Anthropic's `messages.create` and `messages.stream` to automatically capture tokens, latency, cost, and anomalies — then sends traces to your [Cernova](https://cernova.dev) dashboard.
+The detection layer for LLM pipelines. Wraps Anthropic's `messages.create`/`messages.stream` and OpenAI's `chat.completions.create` to automatically capture tokens, latency, and cost — [Cernova](https://cernova.dev) runs per-step anomaly detection on every call and alerts you when something silently regresses.
 
 ## Install
 
