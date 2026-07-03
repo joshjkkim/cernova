@@ -1,9 +1,10 @@
-import json
 import threading
 from fastapi import APIRouter, Request, HTTPException
 import sentry_sdk
 from sentry_sdk import Client as SentryClient, Scope
 
+from adapters import to_canonical
+from schemas.canonical import CanonicalTrace
 from schemas.trace import IngestPayload, IngestResponse
 from services.trace_service import ingest_trace
 from services.slack_service import (
@@ -36,7 +37,7 @@ def _resolve_project(api_key: str) -> dict | None:
         return None
 
 
-def _fire_slack(project: dict, payload: IngestPayload) -> None:
+def _fire_slack(project: dict, payload: CanonicalTrace) -> None:
     """Run in a background thread so it never blocks the ingest response."""
     webhook = project.get("slack_webhook_url")
     if not webhook:
@@ -83,7 +84,7 @@ def _fire_slack(project: dict, payload: IngestPayload) -> None:
 
 
 def _fire_user_sentry_performance(
-    dsn: str, payload: IngestPayload, anomaly_score: float, triggered: bool, project_name: str
+    dsn: str, payload: CanonicalTrace, anomaly_score: float, triggered: bool, project_name: str
 ) -> None:
     """Send a Sentry Performance transaction for every LLM call — not just anomalous ones.
     Steps in the same run share a trace_id so Sentry can reconstruct the full pipeline."""
@@ -168,7 +169,7 @@ def _fire_user_sentry_performance(
         print(f"[ingest] sentry performance failed: {exc}")
 
 
-def _fire_user_sentry(dsn: str, payload: IngestPayload, result, project_name: str) -> None:
+def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: str) -> None:
     """Send an anomaly event to the user's own Sentry project."""
     try:
         user_client = SentryClient(dsn=dsn, default_integrations=False)
@@ -197,24 +198,6 @@ def _fire_user_sentry(dsn: str, payload: IngestPayload, result, project_name: st
         print(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
     except Exception as exc:
         print(f"[ingest] user sentry fire failed: {exc}")
-
-
-def _extract_instruction(prompt: str) -> str:
-    """If the prompt is SDK-format JSON {system, messages}, return the readable instruction text.
-    Prevents JSON wrapper keys/words from confusing L2/L3 format checks."""
-    try:
-        obj = json.loads(prompt)
-        if isinstance(obj, dict) and "messages" in obj:
-            parts = []
-            if obj.get("system"):
-                parts.append(str(obj["system"]))
-            for msg in obj.get("messages", []):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    parts.append(str(msg.get("content", "")))
-            return "\n".join(parts)
-    except (ValueError, TypeError):
-        pass
-    return prompt
 
 
 def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> dict[str, float] | None:
@@ -261,12 +244,26 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
         return None
 
 
-def _run_anomaly_detection(payload: IngestPayload, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None) -> None:
+def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None) -> None:
     """Run in a background thread — score the call and persist any anomalies."""
     try:
         from anomaly.config import EvalConfig
-        call_input = CallInput.model_validate(
-            {**payload.model_dump(), "prompt": _extract_instruction(payload.prompt)}
+        # instruction_text() keeps JSON wrapper keys out of L2/L3 format checks
+        call_input = CallInput(
+            step_name=payload.step_name,
+            model=payload.model,
+            prompt=payload.instruction_text(),
+            input_tokens=payload.input_tokens,
+            output_tokens=payload.output_tokens,
+            reasoning_tokens=payload.reasoning_tokens,
+            total_tokens=payload.total_tokens,
+            latency_ms=payload.latency_ms,
+            cost=payload.cost,
+            status_success=payload.status_success,
+            error=payload.error,
+            output_code=payload.output_text,
+            run_id=payload.run_id,
+            project_id=payload.project_id,
         )
         config = EvalConfig()
         if project:
@@ -353,7 +350,7 @@ def _run_anomaly_detection(payload: IngestPayload, project: dict | None, step_pr
         print(f"[ingest] anomaly detection failed for run {payload.run_id}: {exc}")
 
 
-def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, trace_id: str) -> None:
+def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str) -> None:
     """Fingerprint first to get step_profile_id, then run anomaly detection with it.
     Keeps them in one thread so anomaly detection gets per-step baselines."""
     step_profile_id: str | None = None
@@ -364,7 +361,8 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
             profile_id, _ = match_or_create_profile(
                 project_id=payload.project_id,
                 step_name=payload.step_name,
-                prompt_json=payload.prompt,
+                kernel=payload.kernel(),
+                system_text=payload.system,
             )
             if profile_id:
                 step_profile_id = profile_id
@@ -388,11 +386,14 @@ def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
     project = _resolve_project(api_key)
     payload.project_id = project["id"] if project else None
 
-    trace_id = ingest_trace(payload)
+    # Wire format → canonical. Everything downstream consumes only CanonicalTrace.
+    trace = to_canonical(payload)
 
-    threading.Thread(target=_run_fingerprint_then_anomaly, args=(payload, project, trace_id), daemon=True).start()
+    trace_id = ingest_trace(trace)
+
+    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
 
     if project:
-        threading.Thread(target=_fire_slack, args=(project, payload), daemon=True).start()
+        threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
 
     return IngestResponse(trace_id=trace_id)

@@ -28,6 +28,7 @@ propcache==0.5.2
 pycparser==3.0
 pydantic==2.13.4
 pydantic_core==2.46.4
+pytest>=8.0
 PyJWT==2.13.0
 realtime==2.31.0
 scikit-learn==1.9.0

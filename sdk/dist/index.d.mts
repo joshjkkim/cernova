@@ -10,6 +10,8 @@ interface TraceConfig {
     apiUrl?: string;
 }
 interface TracePayload {
+    /** Wire-format version. Injected by Tracer.ingest — callers never set it. */
+    schema_version?: number;
     run_id: string;
     step_name: string;
     step_index: number;

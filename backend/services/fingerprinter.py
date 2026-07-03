@@ -1,7 +1,7 @@
 """
 Step fingerprinting — semantic identity for LLM calls.
 
-On every ingest, extract the stable instruction part of the prompt, embed it
+On every ingest, embed the stable instruction kernel (CanonicalTrace.kernel())
 with a local sentence-transformers model, and match against known step profiles
 for this project using pgvector cosine similarity.
 
@@ -11,7 +11,6 @@ Three outcomes:
   new      — similarity < 0.75, genuinely new step, create profile
 """
 
-import json
 import threading
 from functools import lru_cache
 
@@ -35,64 +34,30 @@ def _embed(text: str) -> list[float]:
     return model.encode(text, normalize_embeddings=True).tolist()
 
 
-def _extract_kernel(prompt_json: str) -> str:
-    """Pull the stable instruction part out of the prompt JSON.
-
-    Supports two formats:
-      TS SDK:  {"system": "...", "messages": [...]}
-      LangChain/Python: {"messages": [{"role": "system", ...}, ...]}
-    The system prompt is the stable identity of a step; user messages vary per call.
-    """
-    try:
-        obj = json.loads(prompt_json)
-        if isinstance(obj, dict):
-            # TS SDK format — top-level system field
-            if obj.get("system"):
-                return str(obj["system"])[:500]
-            msgs = obj.get("messages", [])
-            # LangChain format — system message inside messages array
-            for msg in msgs:
-                if isinstance(msg, dict) and msg.get("role") == "system":
-                    content = msg.get("content", "")
-                    text = content if isinstance(content, str) else str(content)
-                    return text[:500]
-            # Fallback: first user message
-            for msg in msgs:
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    content = msg.get("content", "")
-                    text = content if isinstance(content, str) else str(content)
-                    return text[:200]
-    except (ValueError, TypeError):
-        pass
-    return prompt_json[:200]
-
-
-def _derive_step_name(prompt_json: str) -> str | None:
+def _derive_step_name(system_text: str | None) -> str | None:
     """Auto-generate a readable step name from the system prompt if no name was given."""
-    try:
-        obj = json.loads(prompt_json)
-        system = obj.get("system") if isinstance(obj, dict) else None
-        if not system:
-            return None
-        words = str(system).split()[:4]
-        slug = "-".join(words).lower()
-        slug = "".join(c if c.isalnum() or c == "-" else "" for c in slug)
-        return slug[:40] or None
-    except (ValueError, TypeError):
+    if not system_text:
         return None
+    words = system_text.split()[:4]
+    slug = "-".join(words).lower()
+    slug = "".join(c if c.isalnum() or c == "-" else "" for c in slug)
+    return slug[:40] or None
 
 
 def match_or_create_profile(
     project_id: str,
     step_name: str,
-    prompt_json: str,
+    kernel: str,
+    system_text: str | None = None,
 ) -> tuple[str | None, str]:
     """
+    Match the pre-extracted instruction kernel (CanonicalTrace.kernel()) against
+    this project's step profiles.
+
     Returns (step_profile_id, status) where status is 'matched', 'evolved', or 'new'.
     Returns (None, 'error') if anything fails — ingest should continue regardless.
     """
     try:
-        kernel = _extract_kernel(prompt_json)
         embedding = _embed(kernel)
         db = get_client()
 
@@ -120,7 +85,7 @@ def match_or_create_profile(
 
         # No match — create new profile
         display_name = step_name if not step_name.startswith("step_") else (
-            _derive_step_name(prompt_json) or step_name
+            _derive_step_name(system_text) or step_name
         )
         res = db.table("step_profiles").insert({
             "project_id":  project_id,

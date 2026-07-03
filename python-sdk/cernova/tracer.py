@@ -12,6 +12,9 @@ from urllib import request as _urllib_request
 
 _DEFAULT_URL = "https://trace-production-940c.up.railway.app"
 
+# Version of the ingest wire format this SDK speaks.
+_SCHEMA_VERSION = 1
+
 # ContextVar so run_id propagates automatically across async/threaded code
 _active_run_id: ContextVar[str | None] = ContextVar("cernova_run_id", default=None)
 _active_step_index: ContextVar[int] = ContextVar("cernova_step_index", default=0)
@@ -57,7 +60,8 @@ class Tracer:
 
     def ingest(self, **fields: Any) -> None:
         """Fire-and-forget POST to /ingest. Never raises — failures are silent."""
-        threading.Thread(target=self._post, args=(fields,), daemon=True).start()
+        payload = {"schema_version": _SCHEMA_VERSION, **fields}
+        threading.Thread(target=self._post, args=(payload,), daemon=True).start()
 
     def _post(self, payload: dict[str, Any]) -> None:
         try:

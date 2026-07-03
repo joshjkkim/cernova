@@ -423,6 +423,7 @@ function uuid4() {
   });
 }
 var DEFAULT_API_URL = "https://trace-production-940c.up.railway.app";
+var SCHEMA_VERSION = 1;
 var Tracer = class {
   constructor(config) {
     this.apiUrl = (config.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
@@ -436,7 +437,7 @@ var Tracer = class {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${this.apiKey}`
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ schema_version: SCHEMA_VERSION, ...payload })
     }).then((res) => res.ok ? res.json() : Promise.reject(res.status)).then((data) => data.trace_id ?? null).catch((err) => {
       console.warn("[cernova] ingest failed:", err);
       return null;
