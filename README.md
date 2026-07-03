@@ -87,10 +87,10 @@ Traces in from what you already run, alerts out to where you already look.
 | OpenAI SDK (TypeScript) | traces in | ✅ live |
 | LangChain (Python — Anthropic, OpenAI, Gemini, any provider) | traces in | ✅ live |
 | Manual ingest (any model, TS + Python) | traces in | ✅ live |
+| OpenTelemetry GenAI ingest (OTLP `/v1/traces`, JSON + protobuf) | traces in | ✅ live |
+| Vercel AI SDK telemetry (via OTLP) | traces in | ✅ live |
 | Slack | alerts out | ✅ live |
 | Sentry (performance transactions + anomaly issues) | alerts out | ✅ live |
-| OpenTelemetry GenAI ingest | traces in | 🔜 planned |
-| Vercel AI SDK telemetry | traces in | 🔜 planned |
 | Langfuse / LangSmith import (warm-start baselines from existing traces) | traces in | 🔜 planned |
 | Generic webhooks / PagerDuty | alerts out | 🔜 planned |
 

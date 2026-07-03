@@ -375,6 +375,22 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
     _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id)
 
 
+def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:
+    """Persist a canonical trace and kick off fingerprinting, anomaly detection,
+    and Slack alerts in background threads. Shared entry point for every ingest
+    source (SDK payloads, OTLP, imports). Returns the new CALLS row id."""
+    trace.project_id = project["id"] if project else None
+
+    trace_id = ingest_trace(trace)
+
+    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
+
+    if project:
+        threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
+
+    return trace_id
+
+
 @router.post("/ingest", response_model=IngestResponse)
 def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
     auth = request.headers.get("Authorization", "")
@@ -384,16 +400,9 @@ def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
         raise HTTPException(status_code=401, detail="Missing API key")
 
     project = _resolve_project(api_key)
-    payload.project_id = project["id"] if project else None
 
     # Wire format → canonical. Everything downstream consumes only CanonicalTrace.
     trace = to_canonical(payload)
-
-    trace_id = ingest_trace(trace)
-
-    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
-
-    if project:
-        threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
+    trace_id = process_canonical(trace, project)
 
     return IngestResponse(trace_id=trace_id)

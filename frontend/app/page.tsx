@@ -401,8 +401,8 @@ export default function LandingPage() {
               ['LangChain', 'python · any provider', true],
               ['Slack', 'alerts out', true],
               ['Sentry', 'transactions + issues out', true],
-              ['OpenTelemetry', 'genai ingest', false],
-              ['Vercel AI SDK', 'telemetry ingest', false],
+              ['OpenTelemetry', 'genai ingest', true],
+              ['Vercel AI SDK', 'telemetry ingest', true],
               ['Langfuse import', 'warm-start baselines', false],
             ].map(([name, sub, live]) => (
               <div key={name as string} className="bg-black p-5">

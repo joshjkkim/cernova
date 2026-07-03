@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "cernova"
-version = "0.1.0"
+version = "0.1.1"
 description = "The detection layer for LLM pipelines — per-step anomaly detection on tokens, latency, and cost"
 readme = "README.md"
 requires-python = ">=3.9"

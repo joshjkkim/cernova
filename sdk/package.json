@@ -1,6 +1,6 @@
 {
   "name": "@cernova/sdk",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "The detection layer for LLM pipelines — wraps Anthropic and OpenAI clients to capture tokens, latency, and cost, with per-step anomaly detection",
   "main": "dist/index.cjs",
   "module": "dist/index.js",

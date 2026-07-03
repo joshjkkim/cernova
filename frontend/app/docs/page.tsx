@@ -99,7 +99,7 @@ const SECTIONS: { id: Section; label: string; sub: string }[] = [
   { id: 'start',        label: 'Getting started', sub: 'quick start, concepts, install' },
   { id: 'sdk',          label: 'SDK reference',   sub: 'TypeScript · Python / LangChain' },
   { id: 'detection',    label: 'Anomaly detection', sub: 'L1–L5, step identity, trends' },
-  { id: 'integrations', label: 'Integrations',    sub: 'Slack, Sentry' },
+  { id: 'integrations', label: 'Integrations',    sub: 'OpenTelemetry, Slack, Sentry' },
 ];
 
 // ── Section: Getting started ──────────────────────────────────────────────────
@@ -546,11 +546,28 @@ function SectionIntegrations() {
         Performance spans follow <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenTelemetry GenAI semantic conventions</a> — gen_ai.usage.input_tokens, gen_ai.system: &quot;anthropic&quot; — compatible with Sentry&apos;s native AI monitoring.
       </Callout>
 
+      <H2>OpenTelemetry</H2>
+      <P>Already emitting OpenTelemetry GenAI spans — via <a href="https://github.com/traceloop/openllmetry" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenLLMetry</a>, Traceloop, or native instrumentation? Point your OTLP exporter at Cernova and every LLM span flows into the same detection pipeline — no SDK, no code change. Cernova reads the <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">GenAI semantic conventions</a> and ignores non-LLM spans.</P>
+      <Code lang="bash">{`# Point any OTLP exporter at Cernova
+OTEL_EXPORTER_OTLP_ENDPOINT=https://cernova.dev
+OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
+      <P>Traces post to <code className="text-violet-400 font-mono">/v1/traces</code> (OTLP/HTTP, JSON or protobuf). The span&apos;s <code className="text-violet-400 font-mono">trace_id</code> becomes the Cernova run, each GenAI span becomes a step, and per-step fingerprinting and anomaly detection run exactly as they do for SDK ingests.</P>
+      <Callout type="info">
+        OTel spans rarely carry cost, so cost-based L5 detection is skipped for OTel traces — latency and token detection apply as normal. Use a Cernova SDK if you want cost tracking.
+      </Callout>
+
+      <H2>Vercel AI SDK</H2>
+      <P>The <a href="https://sdk.vercel.ai" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">Vercel AI SDK</a> emits OpenTelemetry telemetry natively. Enable it per call and route the exporter to Cernova — no wrapper needed.</P>
+      <Code>{`const result = await generateText({
+  model: openai('gpt-4o-mini'),
+  prompt: '...',
+  experimental_telemetry: { isEnabled: true },
+})`}</Code>
+      <P>With <code className="text-violet-400 font-mono">OTEL_EXPORTER_OTLP_ENDPOINT</code> and the Authorization header set as above, every generation is traced and scored automatically.</P>
+
       <H2>On the roadmap</H2>
       <P>Planned integrations, in rough priority order:</P>
       <Rows items={[
-        { key: 'OpenTelemetry', label: 'traces in',  color: 'text-gray-400', value: 'OTLP ingest following the GenAI semantic conventions — point any OTel-instrumented app (OpenLLMetry, Traceloop) at Cernova with no SDK change.' },
-        { key: 'Vercel AI SDK', label: 'traces in',  color: 'text-gray-400', value: 'Consume the AI SDK\'s built-in telemetry — one exporter config line, no wrapper.' },
         { key: 'Langfuse import', label: 'traces in', color: 'text-gray-400', value: 'Upload a Langfuse or LangSmith export to warm per-step baselines in minutes instead of waiting for live traffic.' },
         { key: 'Webhooks',      label: 'alerts out', color: 'text-gray-400', value: 'Generic webhook destination posting the structured anomaly payload anywhere — PagerDuty, Opsgenie, your own automation.' },
       ]} />
