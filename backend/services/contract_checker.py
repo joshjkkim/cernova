@@ -18,8 +18,8 @@ from services.contract_learner import _json_type
 def check_output(output: str | None, contract: LearnedContract) -> ContractCheckResult:
     violations: list[ContractViolation] = []
 
-    # Only enforce once the contract has left the observing stage.
-    if contract.status == "observing":
+    # Enforce nothing while still observing, or once a human has rejected it.
+    if contract.status in ("observing", "rejected"):
         return ContractCheckResult(passed=True)
 
     if contract.format == "json":

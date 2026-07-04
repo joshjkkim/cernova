@@ -144,3 +144,16 @@ def promote_contract(step_profile_id: str) -> bool:
     store_contract(step_profile_id, contract)
     print(f"[contract] enforced profile={step_profile_id}")
     return True
+
+
+def reject_contract(step_profile_id: str) -> bool:
+    """Mark a contract rejected — it enforces nothing and won't be re-proposed.
+    Called when a user says the learned contract is wrong. (Relaxing an
+    individual rule rather than the whole contract is a later refinement.)"""
+    contract = load_contract(step_profile_id)
+    if not contract:
+        return False
+    contract.status = "rejected"
+    store_contract(step_profile_id, contract)
+    print(f"[contract] rejected profile={step_profile_id}")
+    return True
