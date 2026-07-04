@@ -3,8 +3,8 @@
 Each test documents one PASS (clean, no hits) or FAIL (a specific hard code
 fires) scenario. Runnable two ways:
 
-    cd anomaly && pytest                       # once pytest is installed
-    ../backend/.venv/bin/python tests/test_layer_1_hard.py   # no pytest needed
+    cd backend && pytest anomaly/tests/test_layer_1_hard.py
+    cd backend && .venv/bin/python anomaly/tests/test_layer_1_hard.py   # no pytest needed
 """
 
 from __future__ import annotations
@@ -12,12 +12,13 @@ from __future__ import annotations
 import os
 import sys
 
-# Allow running directly (no install) by putting the package root on sys.path.
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Allow running directly (no install) by putting the backend root on sys.path
+# so the `anomaly` package (and its relative imports) resolves.
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from config import EvalConfig
-from layers.layer_1_hard import run_layer_1_hard
-from schemas import CallInput
+from anomaly.config import EvalConfig
+from anomaly.layers.layer_1_hard import run_layer_1_hard
+from anomaly.schemas import CallInput
 
 CFG = EvalConfig()
 
@@ -38,7 +39,7 @@ def _base(**overrides) -> CallInput:
         error=None,
         output_code="no",
         run_id="run_abc",
-        project_id=1,
+        project_id="proj_1",
     )
     data.update(overrides)
     return CallInput(**data)
