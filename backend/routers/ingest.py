@@ -407,24 +407,32 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
             log.error(f"[contract] induction failed for profile={step_profile_id}", exc_info=True)
 
 
-def process_canonical(trace: CanonicalTrace, project: dict | None, suppress_alerts: bool = False) -> str:
+def process_canonical(trace: CanonicalTrace, project: dict | None, suppress_alerts: bool = False, synchronous: bool = False) -> str:
     """Persist a canonical trace and kick off fingerprinting, anomaly detection,
-    and Slack alerts in background threads. Shared entry point for every ingest
-    source (SDK payloads, OTLP, imports). Returns the new CALLS row id.
+    and Slack alerts. Shared entry point for every ingest source (SDK payloads,
+    OTLP, imports). Returns the new CALLS row id.
 
     suppress_alerts=True still fingerprints, scores, and builds baselines but
     fires no Slack/Sentry — used by historical imports so backfilling months of
-    old traffic doesn't blast a channel with stale alerts."""
+    old traffic doesn't blast a channel with stale alerts.
+
+    synchronous=True runs fingerprint/anomaly inline instead of in a background
+    thread. Imports use it so a batch of thousands doesn't spawn a thread per
+    call and so baselines build in the order the caller feeds rows (chronological
+    for a backfill) rather than racing."""
     trace.project_id = project["id"] if project else None
 
     trace_id = ingest_trace(trace)
 
-    threading.Thread(
-        target=_run_fingerprint_then_anomaly,
-        args=(trace, project, trace_id),
-        kwargs={"suppress_alerts": suppress_alerts},
-        daemon=True,
-    ).start()
+    if synchronous:
+        _run_fingerprint_then_anomaly(trace, project, trace_id, suppress_alerts=suppress_alerts)
+    else:
+        threading.Thread(
+            target=_run_fingerprint_then_anomaly,
+            args=(trace, project, trace_id),
+            kwargs={"suppress_alerts": suppress_alerts},
+            daemon=True,
+        ).start()
 
     if project and not suppress_alerts:
         threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
