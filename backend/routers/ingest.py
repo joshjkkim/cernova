@@ -247,8 +247,10 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
         return None
 
 
-def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None) -> None:
-    """Run in a background thread — score the call and persist any anomalies."""
+def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None, suppress_alerts: bool = False) -> None:
+    """Run in a background thread — score the call and persist any anomalies.
+    Anomalies are always persisted; suppress_alerts only gates the outbound
+    Slack/Sentry fires (so imports build baselines silently)."""
     try:
         from anomaly.config import EvalConfig
         # instruction_text() keeps JSON wrapper keys out of L2/L3 format checks
@@ -328,7 +330,7 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
         # Performance transaction for every call — fires even if no anomaly
         _perf_dsn   = project.get("sentry_dsn") if project else None
         _perf_level = (project.get("sentry_alert_level") or "critical") if project else "critical"
-        if _perf_dsn and _perf_level != "none":
+        if not suppress_alerts and _perf_dsn and _perf_level != "none":
             _fire_user_sentry_performance(_perf_dsn, payload, result.total_score, result.triggered, project.get("name", "unknown"))
 
         if result.error_map:
@@ -344,13 +346,13 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
 
             dsn = project.get("sentry_dsn") if project else None
             level = (project.get("sentry_alert_level") or "critical") if project else "critical"
-            if dsn and level != "none":
+            if not suppress_alerts and dsn and level != "none":
                 if level == "warning" or result.triggered:
                     _fire_user_sentry(dsn, payload, result, project.get("name", "unknown"))
 
             webhook = project.get("slack_webhook_url") if project else None
             slack_level = (project.get("slack_anomaly_level") or "critical") if project else "critical"
-            if webhook and slack_level != "none":
+            if not suppress_alerts and webhook and slack_level != "none":
                 if slack_level == "warning" or result.triggered:
                     from anomaly import CONDITION_REGISTRY
                     condition_names = {
@@ -372,7 +374,7 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
         log.error(f"[ingest] anomaly detection failed for run {payload.run_id}", exc_info=True)
 
 
-def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str) -> None:
+def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str, suppress_alerts: bool = False) -> None:
     """Fingerprint first to get step_profile_id, then run anomaly detection with it.
     Keeps them in one thread so anomaly detection gets per-step baselines."""
     step_profile_id: str | None = None
@@ -394,7 +396,7 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
         except Exception:
             log.error("[fingerprint] failed", exc_info=True)
 
-    _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id)
+    _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id, suppress_alerts=suppress_alerts)
 
     # Induce/refresh the step's output contract from history for future calls.
     if step_profile_id:
@@ -405,17 +407,26 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
             log.error(f"[contract] induction failed for profile={step_profile_id}", exc_info=True)
 
 
-def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:
+def process_canonical(trace: CanonicalTrace, project: dict | None, suppress_alerts: bool = False) -> str:
     """Persist a canonical trace and kick off fingerprinting, anomaly detection,
     and Slack alerts in background threads. Shared entry point for every ingest
-    source (SDK payloads, OTLP, imports). Returns the new CALLS row id."""
+    source (SDK payloads, OTLP, imports). Returns the new CALLS row id.
+
+    suppress_alerts=True still fingerprints, scores, and builds baselines but
+    fires no Slack/Sentry — used by historical imports so backfilling months of
+    old traffic doesn't blast a channel with stale alerts."""
     trace.project_id = project["id"] if project else None
 
     trace_id = ingest_trace(trace)
 
-    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
+    threading.Thread(
+        target=_run_fingerprint_then_anomaly,
+        args=(trace, project, trace_id),
+        kwargs={"suppress_alerts": suppress_alerts},
+        daemon=True,
+    ).start()
 
-    if project:
+    if project and not suppress_alerts:
         threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
 
     return trace_id

@@ -52,8 +52,17 @@ class CanonicalTrace(BaseModel):
     error: str | None = None
     output_text: str | None = None
 
+    # Timing — when the call actually happened, ISO 8601. None → the DB stamps
+    # now() at insert (live ingest). Imports set this to the historical
+    # timestamp so baselines and evolution cutoffs order correctly.
+    timestamp: str | None = None
+
     # Provenance
     source: str = "cernova-sdk"
+    # Stable id from the origin system (Langfuse/LangSmith trace id, etc.). Set
+    # by importers so re-running an import is idempotent; None for live SDK/OTel
+    # ingest. Dedup key is (project_id, source, external_id).
+    external_id: str | None = None
     schema_version: int = 1
     commit_sha: str | None = None      # persisted once CALLS grows provenance columns
     prompt_version: str | None = None  # persisted once CALLS grows provenance columns
