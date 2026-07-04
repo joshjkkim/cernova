@@ -7,8 +7,8 @@ import { useState } from 'react';
 
 function Code({ children, lang = 'ts' }: { children: string; lang?: string }) {
   return (
-    <div className="border border-white/8 overflow-hidden my-5 bg-black">
-      <div className="flex items-center justify-between px-4 py-2 border-b border-white/8">
+    <div className="border border-neutral-800 overflow-hidden my-5 bg-black">
+      <div className="flex items-center justify-between px-4 py-2 border-b border-neutral-800">
         <span className="text-[10px] font-mono text-gray-700 uppercase tracking-widest">{lang}</span>
       </div>
       <pre className="px-5 py-4 text-xs font-mono text-violet-300 overflow-x-auto leading-6 whitespace-pre">{children}</pre>
@@ -39,11 +39,11 @@ function P({ children }: { children: React.ReactNode }) {
 
 function Table({ rows }: { rows: { f: string; t?: string; d: string }[] }) {
   return (
-    <div className="border border-white/8 overflow-hidden mb-6">
+    <div className="border border-neutral-800 overflow-hidden mb-6">
       <table className="w-full">
-        <tbody className="divide-y divide-white/8">
+        <tbody className="divide-y divide-neutral-800">
           {rows.map((r) => (
-            <tr key={r.f} className="hover:bg-white/2 transition-colors">
+            <tr key={r.f} className="hover:bg-neutral-900 transition-colors">
               <td className="px-4 py-3 font-mono text-[11px] text-gray-300 align-top w-36 shrink-0">{r.f}</td>
               {r.t && <td className="px-4 py-3 font-mono text-[11px] text-violet-400 align-top w-20">{r.t}</td>}
               <td className="px-4 py-3 font-mono text-[11px] text-gray-600 leading-5">{r.d}</td>
@@ -57,9 +57,9 @@ function Table({ rows }: { rows: { f: string; t?: string; d: string }[] }) {
 
 function Rows({ items }: { items: { key: string; label?: string; color?: string; value: string }[] }) {
   return (
-    <div className="border border-white/8 divide-y divide-white/8 mb-6">
+    <div className="border border-neutral-800 divide-y divide-neutral-800 mb-6">
       {items.map((r) => (
-        <div key={r.key} className="flex gap-4 px-4 py-3 hover:bg-white/2 transition-colors">
+        <div key={r.key} className="flex gap-4 px-4 py-3 hover:bg-neutral-900 transition-colors">
           <span className={`font-mono text-[11px] shrink-0 w-32 ${r.color ?? 'text-gray-400'}`}>{r.key}</span>
           {r.label && <span className="font-mono text-[11px] text-gray-300 shrink-0 w-20">{r.label}</span>}
           <span className="font-mono text-[11px] text-gray-600 leading-5">{r.value}</span>
@@ -73,15 +73,15 @@ type Lang = 'ts' | 'py';
 
 function LangSwitch({ lang, setLang }: { lang: Lang; setLang: (l: Lang) => void }) {
   return (
-    <div className="flex border border-white/8 mb-8 w-fit">
+    <div className="flex border border-neutral-800 mb-8 w-fit">
       {(['ts', 'py'] as Lang[]).map((l, i) => (
         <button
           key={l}
           onClick={() => setLang(l)}
           className={[
             'px-4 py-1.5 font-mono text-xs transition-colors',
-            i === 0 ? 'border-r border-white/8' : '',
-            lang === l ? 'bg-white/5 text-white' : 'text-gray-600 hover:text-gray-400',
+            i === 0 ? 'border-r border-neutral-800' : '',
+            lang === l ? 'bg-neutral-900 text-white' : 'text-gray-600 hover:text-gray-400',
           ].join(' ')}
         >
           {l === 'ts' ? 'TypeScript' : 'Python'}
@@ -98,8 +98,8 @@ type Section = 'start' | 'sdk' | 'detection' | 'integrations';
 const SECTIONS: { id: Section; label: string; sub: string }[] = [
   { id: 'start',        label: 'Getting started', sub: 'quick start, concepts, install' },
   { id: 'sdk',          label: 'SDK reference',   sub: 'TypeScript · Python / LangChain' },
-  { id: 'detection',    label: 'Anomaly detection', sub: 'L1–L5, step identity, trends' },
-  { id: 'integrations', label: 'Integrations',    sub: 'OpenTelemetry, Slack, Sentry' },
+  { id: 'detection',    label: 'Anomaly detection', sub: 'layers, contracts, confirmations' },
+  { id: 'integrations', label: 'Integrations',    sub: 'import, OpenTelemetry, Slack, Sentry' },
 ];
 
 // ── Section: Getting started ──────────────────────────────────────────────────
@@ -215,6 +215,21 @@ await anthropic.messages.create({
 })`}</Code>
       <Callout type="tip">
         The original client is not modified. Keep both — wrapped for traced calls, original for anything you don&apos;t want traced.
+      </Callout>
+
+      <H2>wrapOpenAI(client)</H2>
+      <P>The same drop-in pattern for the OpenAI client. Wraps <code className="text-violet-400 font-mono">chat.completions.create()</code>, forwards it unchanged, and ingests the trace once the response returns. Pricing for gpt-4o, gpt-4o-mini, o1, o3-mini and others is built in, so cost is captured automatically.</P>
+      <Code>{`import OpenAI from 'openai'
+
+const openai = tracer.wrapOpenAI(new OpenAI())
+
+await openai.chat.completions.create({
+  model: 'gpt-4o-mini',
+  messages: [{ role: 'user', content: 'Summarise...' }],
+  _trace: { stepName: 'summarize' },
+})`}</Code>
+      <Callout type="tip">
+        Anthropic and OpenAI wrappers share one tracer. Mix providers inside the same <code className="text-gray-300">run()</code> and every step still lands under one run_id.
       </Callout>
 
       <H2>run()</H2>
@@ -427,14 +442,14 @@ function SectionDetection() {
       <H2>How it works</H2>
       <P>Every ingested call is scored by a 4-layer engine running in the background. No configuration required. Scores accumulate — a single L1 hit (100 pts) is immediately critical. L2–L4 conditions score 10–60 pts each and require several to fire before crossing threshold. The engine short-circuits once score ≥ 100 pts.</P>
 
-      <div className="border border-white/8 divide-y divide-white/8 mb-8">
+      <div className="border border-neutral-800 divide-y divide-neutral-800 mb-8">
         {[
           { layer: 'L1', accent: 'border-red-600',    label: 'text-red-400',    title: 'Hard failures',        desc: 'Deterministic, non-heuristic. status_success=false, error present, token accounting mismatch (total ≠ input+output), negative counts. Any single hit → 100pts → immediate trigger.' },
           { layer: 'L2', accent: 'border-orange-600', label: 'text-orange-400', title: 'Format violations',    desc: 'Prompt-implied output contracts. Prompt asks for JSON but output isn\'t valid JSON. Yes/no prompt but output is prose. Enum step returned a non-enumerated value.' },
           { layer: 'L4', accent: 'border-blue-600',   label: 'text-blue-400',   title: 'Numeric thresholds',   desc: 'Static and adaptive p95 limits for latency, tokens, cost. Stall detection (high latency, near-zero output). Cross-field plausibility checks. Defers 4001/4002/4003 to L5 when baseline is active.' },
           { layer: 'L5', accent: 'border-violet-600', label: 'text-violet-400', title: 'Statistical baseline', desc: 'IQR/log-normal detection against each step\'s own call history. Tukey fence computed in log space — multiplicative detection (is this 5× the 75th percentile?) rather than additive. Activates after 20 clean calls. Owns latency/tokens/cost scoring when active.' },
         ].map((l) => (
-          <div key={l.layer} className={`flex gap-4 px-4 py-4 border-l-2 ${l.accent} hover:bg-white/2 transition-colors`}>
+          <div key={l.layer} className={`flex gap-4 px-4 py-4 border-l-2 ${l.accent} hover:bg-neutral-900 transition-colors`}>
             <span className={`font-mono text-xs font-bold shrink-0 w-6 mt-0.5 ${l.label}`}>{l.layer}</span>
             <div>
               <div className="font-sans font-bold text-sm text-white mb-1">{l.title}</div>
@@ -457,7 +472,7 @@ function SectionDetection() {
 
       <H2>L5 — statistical detection</H2>
       <P>Once a step has 20+ calls, Cernova builds a per-step baseline using IQR statistics in log space. Every metric (latency, tokens, cost) is treated as log-normal — the right model for LLM data, which is always positive and right-skewed. Detection uses the Tukey fence:</P>
-      <div className="border border-white/8 bg-black px-5 py-4 mb-5 font-mono text-sm text-gray-300 leading-7">
+      <div className="border border-neutral-800 bg-black px-5 py-4 mb-5 font-mono text-sm text-gray-300 leading-7">
         <div>upper fence = log(Q3) + k × log-IQR</div>
         <div>lower fence = log(Q1) − k × log-IQR</div>
         <div className="mt-2 text-gray-600 text-xs">k = 2.5 (default) · Q1/Q3 = 25th/75th percentile in log space</div>
@@ -484,9 +499,49 @@ function SectionDetection() {
       ]} />
       <P>Trend detection requires at least 30 calls per step (20 baseline + 10 recent). It catches slow latency creep, cost drift, and throughput degradation that individual call scores would miss.</P>
 
+      <H2>Learned output contracts</H2>
+      <P>Beyond the prompt-implied checks in L2, Cernova induces each step&apos;s output contract from its <strong className="text-gray-300">own history</strong> — no schema to hand-write. After 20+ successful outputs it learns the shape: which keys are always present, whether the output is reliably JSON, and small enum domains. New calls are checked against that contract, and structural breaks fold into the anomaly score as L2 codes.</P>
+      <Rows items={[
+        { key: '2010', label: 'format_not_json',      color: 'text-orange-400', value: 'The contract expects JSON but the output no longer parses.' },
+        { key: '2011', label: 'missing_required_key', color: 'text-orange-400', value: 'A key present in effectively every historical output is missing.' },
+        { key: '2012', label: 'wrong_type',           color: 'text-orange-400', value: 'A key\'s value type changed from the type the contract learned.' },
+      ]} />
+      <Callout type="warn">
+        <strong className="text-gray-300">Never silently enforced.</strong> A freshly learned contract starts <strong className="text-gray-300">proposed</strong> — it is checked and logged on live traffic but does not affect scores until you confirm it. Soft drifts (a brand-new enum value, an out-of-range number) are logged as drift signals, never scored.
+      </Callout>
+      <Rows items={[
+        { key: 'observing', color: 'text-gray-600',   value: 'Fewer than 20 samples. Still learning — not yet checking.' },
+        { key: 'proposed',  color: 'text-yellow-500', value: 'Learned and checked on live traffic, logged only. Awaiting your confirmation.' },
+        { key: 'enforced',  color: 'text-green-500',  value: 'Confirmed. Hard violations now fold into the anomaly score.' },
+        { key: 'rejected',  color: 'text-red-500',    value: 'Marked wrong. Enforces nothing and will not be re-proposed.' },
+      ]} />
+
+      <H2>Confirming detections</H2>
+      <P>Detection gets sharper when you tell it what was real. The rare, high-signal moments — a contract proposed, an anomaly fired — take a one-tap human verdict. Verdicts are always stored as labels; for contracts they act immediately. These are proprietary labels only your production traffic can produce — they tune your project now and train the detection model later.</P>
+      <Rows items={[
+        { key: 'confirm', label: 'contract', color: 'text-green-500', value: 'Promotes a proposed contract to enforced — it starts scoring.' },
+        { key: 'reject',  label: 'contract', color: 'text-red-500',   value: 'Retires the contract. It enforces nothing and won\'t be re-proposed.' },
+        { key: 'confirm / reject', label: 'anomaly', color: 'text-violet-400', value: 'Marks an anomaly real or a false alarm. Captured as a label for tuning.' },
+      ]} />
+      <Code lang="bash">{`# List a project's contracts — see what's proposed and worth confirming
+curl https://cernova.dev/contracts \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>"
+
+# Confirm a contract — promotes proposed -> enforced
+curl -X POST https://cernova.dev/feedback \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{"subject_type":"contract","subject_id":"<step_profile_id>","verdict":"confirm"}'`}</Code>
+      <Table rows={[
+        { f: 'subject_type', d: 'contract · anomaly · diagnosis — what the verdict is about.' },
+        { f: 'subject_id',   d: 'The step_profile_id (contract), anomaly id, or run_id.' },
+        { f: 'verdict',      d: 'confirm or reject.' },
+        { f: 'detail',       d: 'Optional JSON context — which rule, why.' },
+      ]} />
+
       <H2>AI run analysis</H2>
       <P>Open any run and click <strong className="text-gray-300">✦ Analyze Run</strong>. Cernova sends the full run context — every step, every anomaly score, every condition code — to claude-sonnet-4-6 and returns a structured report.</P>
-      <div className="border border-white/8 border-l-2 border-l-violet-600 bg-black px-5 py-4 mb-5">
+      <div className="border border-neutral-800 border-l-2 border-l-violet-600 bg-black px-5 py-4 mb-5">
         <div className="font-mono text-[10px] text-violet-500 uppercase tracking-widest mb-3">Example output</div>
         <div className="space-y-3 font-mono text-[11px] text-gray-600 leading-5">
           <div><span className="text-gray-400 font-bold">Root cause</span><p className="mt-1">parse-request returned malformed JSON (unclosed bracket). This propagated into enrich-context causing a stall, then crashed generate-response with a null-reference when it attempted to read the entity list.</p></div>
@@ -509,7 +564,7 @@ function SectionDetection() {
 function SectionIntegrations() {
   return (
     <div>
-      <P>Cernova is a detection layer, not another pane of glass — anomalies flow out to the tools your team already watches. Both integrations are configured per-project in <strong className="text-gray-300">Settings</strong> — no code changes needed.</P>
+      <P>Cernova is a detection layer, not another pane of glass. Traces flow <strong className="text-gray-300">in</strong> from what you already run — SDKs, OpenTelemetry, or a one-time import — and anomalies flow <strong className="text-gray-300">out</strong> to the tools your team already watches. Slack and Sentry are configured per-project in <strong className="text-gray-300">Settings</strong>, no code changes needed.</P>
 
       <H2>Slack</H2>
       <P>Paste a Slack <a href="https://api.slack.com/messaging/webhooks" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">Incoming Webhook URL</a> into project settings. Cernova posts alerts when:</P>
@@ -565,11 +620,26 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
 })`}</Code>
       <P>With <code className="text-violet-400 font-mono">OTEL_EXPORTER_OTLP_ENDPOINT</code> and the Authorization header set as above, every generation is traced and scored automatically.</P>
 
+      <H2>Langfuse import</H2>
+      <P>Already running on Langfuse? Import your generation history to warm per-step baselines in minutes instead of waiting for live traffic. Cernova pulls your <code className="text-violet-400 font-mono">GENERATION</code> observations, backdates them to their original timestamps, and replays them through the same pipeline — building step profiles and baselines with alerts suppressed, so backfilling months of traffic fires no stale notifications.</P>
+      <Code lang="bash">{`curl -X POST https://cernova.dev/import/langfuse \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "public_key": "pk-lf-...",
+    "secret_key": "sk-lf-...",
+    "host": "https://cloud.langfuse.com"
+  }'`}</Code>
+      <P>Credentials are validated immediately — bad keys return <code className="text-violet-400 font-mono">400</code> — then the import runs in the background. Once a step crosses 20 imported calls, L5 statistical detection activates automatically.</P>
+      <Callout type="info">
+        Imported calls are tagged <code className="text-gray-300">source=langfuse</code> and deduplicated on their Langfuse observation id, so you can re-run the import any time without creating duplicates.
+      </Callout>
+
       <H2>On the roadmap</H2>
       <P>Planned integrations, in rough priority order:</P>
       <Rows items={[
-        { key: 'Langfuse import', label: 'traces in', color: 'text-gray-400', value: 'Upload a Langfuse or LangSmith export to warm per-step baselines in minutes instead of waiting for live traffic.' },
-        { key: 'Webhooks',      label: 'alerts out', color: 'text-gray-400', value: 'Generic webhook destination posting the structured anomaly payload anywhere — PagerDuty, Opsgenie, your own automation.' },
+        { key: 'LangSmith import', label: 'traces in', color: 'text-gray-400', value: 'The same warm-start import for LangSmith run history — one adapter away.' },
+        { key: 'Webhooks',         label: 'alerts out', color: 'text-gray-400', value: 'Generic webhook destination posting the structured anomaly payload anywhere — PagerDuty, Opsgenie, your own automation.' },
       ]} />
     </div>
   );
@@ -593,7 +663,7 @@ export default function DocsPage() {
     <div className="min-h-screen bg-black text-white antialiased">
 
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/8 bg-black">
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-neutral-800 bg-black">
         <div className="max-w-6xl mx-auto px-6 h-12 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2 font-sans font-black text-sm text-white">
             <img src="/logo.svg" alt="" className="w-5 h-5" />
@@ -612,7 +682,7 @@ export default function DocsPage() {
       <div className="max-w-6xl mx-auto px-6 pt-16 pb-24 flex gap-0">
 
         {/* Sidebar */}
-        <aside className="hidden lg:block w-52 shrink-0 pt-12 border-r border-white/8">
+        <aside className="hidden lg:block w-52 shrink-0 pt-12 border-r border-neutral-800">
           <div className="sticky top-24 pr-6">
             <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-4">Documentation</p>
             <div className="space-y-px">
@@ -623,8 +693,8 @@ export default function DocsPage() {
                   className={[
                     'w-full text-left px-3 py-2.5 border-l-2 transition-colors',
                     active === s.id
-                      ? 'border-violet-600 bg-white/3'
-                      : 'border-transparent hover:border-white/15 hover:bg-white/2',
+                      ? 'border-violet-600 bg-neutral-900'
+                      : 'border-transparent hover:border-neutral-700 hover:bg-neutral-900',
                   ].join(' ')}
                 >
                   <div className={`font-mono text-xs ${active === s.id ? 'text-white' : 'text-gray-500'}`}>{s.label}</div>
@@ -639,7 +709,7 @@ export default function DocsPage() {
         <main className="flex-1 min-w-0 pt-12 pl-0 lg:pl-12 max-w-2xl">
 
           {/* Section header */}
-          <div className="mb-10 pb-6 border-b border-white/8">
+          <div className="mb-10 pb-6 border-b border-neutral-800">
             <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">
               {SECTIONS[idx]?.label}
             </p>
@@ -654,7 +724,7 @@ export default function DocsPage() {
           {content[active]}
 
           {/* Bottom pagination */}
-          <div className="mt-16 pt-8 border-t border-white/8 flex items-center justify-between">
+          <div className="mt-16 pt-8 border-t border-neutral-800 flex items-center justify-between">
             {idx > 0 ? (
               <button
                 onClick={() => setActive(SECTIONS[idx - 1].id)}
