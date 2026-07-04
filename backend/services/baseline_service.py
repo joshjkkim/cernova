@@ -16,10 +16,13 @@ the caller falls back to L4 static thresholds in that case.
 
 from __future__ import annotations
 
+import logging
 import math
 
 from anomaly.schemas import MetricStat, StepBaseline
 from db import get_client
+
+log = logging.getLogger(__name__)
 
 MIN_SAMPLES = 20
 HISTORY_LIMIT = 200
@@ -125,6 +128,6 @@ def compute_baseline(step_profile_id: str, model: str | None = None) -> StepBase
             output_tokens=_stat(output_tokens),
             cost=_stat(costs),
         )
-    except Exception as exc:
-        print(f"[baseline] failed for profile={step_profile_id}: {exc}")
+    except Exception:
+        log.error(f"[baseline] failed for profile={step_profile_id}", exc_info=True)
         return None

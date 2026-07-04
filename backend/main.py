@@ -5,7 +5,10 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from db import check_connection
+from logging_config import configure_logging
 from routers import ingest, traces, projects, calls, anomalies, analyze, otel, feedback
+
+configure_logging()
 
 sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),

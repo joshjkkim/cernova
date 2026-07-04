@@ -1,9 +1,12 @@
+import logging
 import os
 import anthropic
 from fastapi import APIRouter, HTTPException
 from db import get_client
 from services.anomaly_service import get_anomalies_for_run
 from anomaly import CONDITION_REGISTRY
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 
@@ -84,8 +87,8 @@ def _record_usage(project_id: str | None, run_id: str, input_tokens: int, output
         }).execute()
         if project_id:
             _check_budget(project_id, cost)
-    except Exception as exc:
-        print(f"[analyze] usage record failed: {exc}")
+    except Exception:
+        log.error("[analyze] usage record failed", exc_info=True)
 
 
 def _check_budget(project_id: str, just_spent: float) -> None:
@@ -114,8 +117,8 @@ def _check_budget(project_id: str, just_spent: float) -> None:
                 spent_usd=total,
                 budget_usd=budget,
             )
-    except Exception as exc:
-        print(f"[analyze] budget check failed: {exc}")
+    except Exception:
+        log.error("[analyze] budget check failed", exc_info=True)
 
 
 @router.post("/run/{run_id}")

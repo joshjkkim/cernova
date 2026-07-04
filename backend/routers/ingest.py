@@ -1,3 +1,4 @@
+import logging
 import threading
 from fastapi import APIRouter, Request, HTTPException
 import sentry_sdk
@@ -15,6 +16,8 @@ from services.anomaly_service import ingest_anomalies
 from anomaly import evaluate_call, CallInput
 from db import get_client
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["ingest"])
 
 
@@ -30,10 +33,10 @@ def _resolve_project(api_key: str) -> dict | None:
             .execute()
         )
         if not res.data:
-            print(f"[ingest] no project found for key {api_key[:12]}…")
+            log.warning(f"[ingest] no project found for key {api_key[:12]}…")
         return res.data if res.data else None
-    except Exception as exc:
-        print(f"[ingest] _resolve_project error for key {api_key[:12]}…: {exc}")
+    except Exception:
+        log.error(f"[ingest] _resolve_project error for key {api_key[:12]}…", exc_info=True)
         return None
 
 
@@ -79,8 +82,8 @@ def _fire_slack(project: dict, payload: CanonicalTrace) -> None:
             rate = errors / len(rows)
             if rate >= rate_threshold:
                 send_rate_alert(webhook, name, pid, rate, len(rows))
-    except Exception as exc:
-        print(f"[ingest] error rate check failed: {exc}")
+    except Exception:
+        log.error("[ingest] error rate check failed", exc_info=True)
 
 
 def _fire_user_sentry_performance(
@@ -164,9 +167,9 @@ def _fire_user_sentry_performance(
         scope = Scope()
         user_client.capture_event(event, scope=scope)
         user_client.flush(timeout=3)
-        print(f"[sentry-perf] transaction: step={payload.step_name} trace={trace_id[:8]}… score={anomaly_score}")
-    except Exception as exc:
-        print(f"[ingest] sentry performance failed: {exc}")
+        log.info(f"[sentry-perf] transaction: step={payload.step_name} trace={trace_id[:8]}… score={anomaly_score}")
+    except Exception:
+        log.error("[ingest] sentry performance failed", exc_info=True)
 
 
 def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: str) -> None:
@@ -195,9 +198,9 @@ def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: s
             scope=scope,
         )
         flushed = user_client.flush(timeout=5)
-        print(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
-    except Exception as exc:
-        print(f"[ingest] user sentry fire failed: {exc}")
+        log.info(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
+    except Exception:
+        log.error("[ingest] user sentry fire failed", exc_info=True)
 
 
 def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> dict[str, float] | None:
@@ -239,8 +242,8 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
             limits["cost_max"] = max(0.05, percentile(costs, 0.95))
 
         return limits or None
-    except Exception as exc:
-        print(f"[anomaly] dynamic limits failed: {exc}")
+    except Exception:
+        log.error("[anomaly] dynamic limits failed", exc_info=True)
         return None
 
 
@@ -278,13 +281,13 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                     overrides["cost_max"] = project["threshold_cost"]
                 if overrides:
                     config = EvalConfig(limits={**config.limits, **overrides})
-                    print(f"[anomaly] manual L4 limits for project {project['id']}: {overrides}")
+                    log.info(f"[anomaly] manual L4 limits for project {project['id']}: {overrides}")
             else:
                 dynamic = _dynamic_l4_limits(project["id"], step_profile_id=step_profile_id)
                 if dynamic:
                     config = EvalConfig(limits={**config.limits, **dynamic})
                     scope = f"profile={step_profile_id}" if step_profile_id else "project-wide"
-                    print(f"[anomaly] dynamic L4 limits ({scope}): {dynamic}")
+                    log.info(f"[anomaly] dynamic L4 limits ({scope}): {dynamic}")
 
         # L5: inject per-step statistical baseline when available
         if step_profile_id:
@@ -292,7 +295,7 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
             baseline = compute_baseline(step_profile_id, model=payload.model)
             if baseline:
                 config = EvalConfig(**{**config.model_dump(), "baseline": baseline})
-                print(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
+                log.info(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
         result = evaluate_call(call_input, config)
 
         # Contract check: compare this output against the step's learned contract.
@@ -304,23 +307,23 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                 contract = load_contract(step_profile_id)
                 if contract:
                     check, contract_codes = evaluate_contract(contract, payload.output_text)
-                    print(f"[contract] profile={step_profile_id} status={contract.status} "
-                          f"passed={check.passed} violations={[v.code for v in check.violations]}")
+                    log.info(f"[contract] profile={step_profile_id} status={contract.status} "
+                             f"passed={check.passed} violations={[v.code for v in check.violations]}")
                     if contract_codes:
                         for code, penalty in contract_codes.items():
                             result.error_map[code] = penalty
                         result.total_score += sum(contract_codes.values())
                         result.triggered = result.total_score >= result.threshold
-            except Exception as exc:
-                print(f"[contract] check failed for profile={step_profile_id}: {exc}")
+            except Exception:
+                log.error(f"[contract] check failed for profile={step_profile_id}", exc_info=True)
 
         # Mark the CALLS row so it's excluded from future baselines
         if result.triggered and trace_id:
             try:
                 get_client().table("CALLS").update({"anomaly_triggered": True}).eq("id", trace_id).execute()
-            except Exception as exc:
-                print(f"[anomaly] failed to mark anomaly_triggered for trace={trace_id}: {exc}")
-        print(f"[anomaly] run={payload.run_id} step={payload.step_name} score={result.total_score} triggered={result.triggered} layer={result.stopped_at_layer} codes={dict(result.error_map)}")
+            except Exception:
+                log.error(f"[anomaly] failed to mark anomaly_triggered for trace={trace_id}", exc_info=True)
+        log.info(f"[anomaly] run={payload.run_id} step={payload.step_name} score={result.total_score} triggered={result.triggered} layer={result.stopped_at_layer} codes={dict(result.error_map)}")
 
         # Performance transaction for every call — fires even if no anomaly
         _perf_dsn   = project.get("sentry_dsn") if project else None
@@ -365,8 +368,8 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                         condition_names=condition_names,
                         triggered=result.triggered,
                     )
-    except Exception as exc:
-        print(f"[ingest] anomaly detection failed for run {payload.run_id}: {exc}")
+    except Exception:
+        log.error(f"[ingest] anomaly detection failed for run {payload.run_id}", exc_info=True)
 
 
 def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str) -> None:
@@ -388,8 +391,8 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
                 get_client().table("CALLS").update(
                     {"step_profile_id": profile_id}
                 ).eq("id", trace_id).execute()
-        except Exception as exc:
-            print(f"[fingerprint] failed: {exc}")
+        except Exception:
+            log.error("[fingerprint] failed", exc_info=True)
 
     _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id)
 
@@ -398,8 +401,8 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
         try:
             from services.contract_service import maybe_learn_contract
             maybe_learn_contract(step_profile_id)
-        except Exception as exc:
-            print(f"[contract] induction failed for profile={step_profile_id}: {exc}")
+        except Exception:
+            log.error(f"[contract] induction failed for profile={step_profile_id}", exc_info=True)
 
 
 def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:

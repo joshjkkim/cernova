@@ -6,12 +6,16 @@ GET  /contracts — list a project's learned contracts so you can see what's
                   proposed and worth confirming, without a DB shell.
 """
 
+import logging
+
 from fastapi import APIRouter, Request, HTTPException
 
 from db import get_client
 from routers.ingest import _resolve_project
 from schemas.feedback import FeedbackInput, FeedbackResponse, SUBJECT_TYPES, VERDICTS
 from services.feedback_service import store_feedback, apply_feedback
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["feedback"])
 
@@ -37,8 +41,8 @@ def submit_feedback(request: Request, payload: FeedbackInput) -> FeedbackRespons
 
     feedback_id = store_feedback(project["id"], payload)
     applied = apply_feedback(payload)
-    print(f"[feedback] project={project['id']} {payload.subject_type}/{payload.verdict} "
-          f"subject={payload.subject_id} → {applied}")
+    log.info(f"[feedback] project={project['id']} {payload.subject_type}/{payload.verdict} "
+             f"subject={payload.subject_id} → {applied}")
     return FeedbackResponse(id=feedback_id, applied=applied)
 
 

@@ -1,8 +1,11 @@
 import json
+import logging
 import os
 import time
 from urllib.request import urlopen, Request as UrlRequest
 from typing import Optional
+
+log = logging.getLogger(__name__)
 
 DASHBOARD_BASE = os.environ.get("DASHBOARD_BASE_URL", "http://localhost:3000")
 
@@ -23,8 +26,8 @@ def _post(url: str, payload: dict) -> bool:
         req = UrlRequest(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
         with urlopen(req, timeout=5) as resp:
             return resp.status == 200
-    except Exception as exc:
-        print(f"[slack] webhook failed: {exc}")
+    except Exception:
+        log.error("[slack] webhook failed", exc_info=True)
         return False
 
 

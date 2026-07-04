@@ -11,10 +11,13 @@ Three outcomes:
   new      — similarity < 0.75, genuinely new step, create profile
 """
 
+import logging
 import threading
 from functools import lru_cache
 
 from db import get_client
+
+log = logging.getLogger(__name__)
 
 MATCH_THRESHOLD  = 0.92
 EVOLVED_THRESHOLD = 0.75
@@ -78,7 +81,7 @@ def match_or_create_profile(
             updates: dict = {"step_name": step_name, "last_seen_at": "now()"}
             if status == "evolved":
                 updates["last_evolved_at"] = "now()"
-                print(f"[fingerprint] step evolved: {step_name} similarity={similarity:.3f} — baseline reset")
+                log.info(f"[fingerprint] step evolved: {step_name} similarity={similarity:.3f} — baseline reset")
 
             db.table("step_profiles").update(updates).eq("id", profile_id).execute()
             return profile_id, status
@@ -94,9 +97,9 @@ def match_or_create_profile(
         }).execute()
 
         profile_id = res.data[0]["id"]
-        print(f"[fingerprint] new step profile: {display_name} id={profile_id}")
+        log.info(f"[fingerprint] new step profile: {display_name} id={profile_id}")
         return profile_id, "new"
 
-    except Exception as exc:
-        print(f"[fingerprint] failed for project={project_id} step={step_name}: {exc}")
+    except Exception:
+        log.error(f"[fingerprint] failed for project={project_id} step={step_name}", exc_info=True)
         return None, "error"

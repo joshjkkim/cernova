@@ -19,11 +19,15 @@ not run) or any query fails, the functions no-op rather than break ingest.
 
 from __future__ import annotations
 
+import logging
+
 from anomaly import CONDITION_REGISTRY
 from db import get_client
 from schemas.contract import ContractCheckResult, LearnedContract
 from services.contract_checker import check_output
 from services.contract_learner import MIN_SAMPLES, learn_contract
+
+log = logging.getLogger(__name__)
 
 # Map a checker violation code → the registered anomaly condition code.
 # Only hard, structural violations score; soft ones (enum_new_value, out_of_range)
@@ -79,8 +83,8 @@ def load_contract(step_profile_id: str) -> LearnedContract | None:
         if not data or not data.get("contract"):
             return None
         return LearnedContract(**data["contract"])
-    except Exception as exc:
-        print(f"[contract] load failed for profile={step_profile_id}: {exc}")
+    except Exception:
+        log.error(f"[contract] load failed for profile={step_profile_id}", exc_info=True)
         return None
 
 
@@ -89,8 +93,8 @@ def store_contract(step_profile_id: str, contract: LearnedContract) -> None:
         get_client().table("step_profiles").update(
             {"contract": contract.model_dump()}
         ).eq("id", step_profile_id).execute()
-    except Exception as exc:
-        print(f"[contract] store failed for profile={step_profile_id}: {exc}")
+    except Exception:
+        log.error(f"[contract] store failed for profile={step_profile_id}", exc_info=True)
 
 
 def _fetch_output_history(step_profile_id: str) -> list[str]:
@@ -124,13 +128,13 @@ def maybe_learn_contract(step_profile_id: str) -> LearnedContract | None:
 
         contract = learn_contract(outputs)  # status → 'proposed'
         store_contract(step_profile_id, contract)
-        print(
+        log.info(
             f"[contract] learned profile={step_profile_id} format={contract.format} "
             f"required={contract.required_keys} n={contract.sample_count} status={contract.status}"
         )
         return contract
-    except Exception as exc:
-        print(f"[contract] induction failed for profile={step_profile_id}: {exc}")
+    except Exception:
+        log.error(f"[contract] induction failed for profile={step_profile_id}", exc_info=True)
         return None
 
 
@@ -142,7 +146,7 @@ def promote_contract(step_profile_id: str) -> bool:
         return False
     contract.status = "enforced"
     store_contract(step_profile_id, contract)
-    print(f"[contract] enforced profile={step_profile_id}")
+    log.info(f"[contract] enforced profile={step_profile_id}")
     return True
 
 
@@ -155,5 +159,5 @@ def reject_contract(step_profile_id: str) -> bool:
         return False
     contract.status = "rejected"
     store_contract(step_profile_id, contract)
-    print(f"[contract] rejected profile={step_profile_id}")
+    log.info(f"[contract] rejected profile={step_profile_id}")
     return True

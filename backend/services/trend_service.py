@@ -17,10 +17,13 @@ Returns a health status per step profile:
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 
 from db import get_client
+
+log = logging.getLogger(__name__)
 
 RECENT_N   = 10
 BASELINE_N = 50
@@ -111,8 +114,8 @@ def compute_project_health(project_id: str) -> list[StepHealth]:
             .execute()
         )
         profiles = profiles_res.data or []
-    except Exception as exc:
-        print(f"[trend] failed to fetch profiles for project={project_id}: {exc}")
+    except Exception:
+        log.error(f"[trend] failed to fetch profiles for project={project_id}", exc_info=True)
         return []
 
     results: list[StepHealth] = []
@@ -133,8 +136,8 @@ def compute_project_health(project_id: str) -> list[StepHealth]:
                 .execute()
             )
             rows = res.data or []
-        except Exception as exc:
-            print(f"[trend] failed to fetch calls for profile={pid}: {exc}")
+        except Exception:
+            log.error(f"[trend] failed to fetch calls for profile={pid}", exc_info=True)
             continue
 
         if len(rows) < RECENT_N + 10:
