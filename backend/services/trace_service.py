@@ -1,14 +1,15 @@
 from datetime import datetime
 from db import get_client
-from schemas.trace import IngestPayload, TraceRecord, WorkflowRun, WorkflowMetrics
+from schemas.canonical import CanonicalTrace
+from schemas.trace import TraceRecord, WorkflowRun, WorkflowMetrics
 
 
-def ingest_trace(payload: IngestPayload) -> str:
+def ingest_trace(payload: CanonicalTrace) -> str:
     client = get_client()
     data = {
         "step_name":       payload.step_name,
         "model":           payload.model,
-        "prompt":          payload.prompt,
+        "prompt":          payload.raw_prompt,
         "input_tokens":    payload.input_tokens,
         "output_tokens":   payload.output_tokens,
         "reasoning_tokens": payload.reasoning_tokens,
@@ -17,7 +18,7 @@ def ingest_trace(payload: IngestPayload) -> str:
         "cost":            payload.cost,
         "status_success":  payload.status_success,
         "error":           payload.error,
-        "output_code":     payload.output_code,
+        "output_code":     payload.output_text,
         "run_id":          payload.run_id,
         "step_index":      payload.step_index,
         "project_id":      payload.project_id,

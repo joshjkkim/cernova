@@ -1,5 +1,6 @@
 import type { TraceConfig, TracePayload } from './types';
 import { wrapAnthropic, type TracedAnthropic, type AnthropicClientLike } from './wrappers/anthropic';
+import { wrapOpenAI, type TracedOpenAI, type OpenAIClientLike } from './wrappers/openai';
 
 function uuid(): string {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -9,6 +10,9 @@ function uuid(): string {
 }
 
 const DEFAULT_API_URL = 'https://trace-production-940c.up.railway.app';
+
+/** Version of the ingest wire format this SDK speaks. */
+const SCHEMA_VERSION = 1;
 
 export class Tracer {
   private readonly apiUrl: string;
@@ -28,17 +32,21 @@ export class Tracer {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${this.apiKey}`,
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ schema_version: SCHEMA_VERSION, ...payload }),
     })
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
       .then((data: { trace_id: string }) => data.trace_id ?? null)
       .catch((err: unknown) => {
-        console.warn('[trace-ai] ingest failed:', err);
+        console.warn('[cernova] ingest failed:', err);
         return null;
       });
   }
 
   wrapAnthropic(client: AnthropicClientLike): TracedAnthropic {
     return wrapAnthropic(client, this);
+  }
+
+  wrapOpenAI(client: OpenAIClientLike): TracedOpenAI {
+    return wrapOpenAI(client, this);
   }
 }

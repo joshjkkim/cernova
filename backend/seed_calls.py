@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 
+from adapters import to_canonical
 from schemas.trace import IngestPayload
 from services.trace_service import ingest_trace
 
@@ -11,7 +12,7 @@ SEED_FILE = Path(__file__).resolve().parent.parent / "seed" / "calls-test-data.j
 def main() -> None:
     rows = json.loads(SEED_FILE.read_text())
     for row in rows:
-        payload = IngestPayload(**row)
+        payload = to_canonical(IngestPayload(**row))
         call_id = ingest_trace(payload)
         print(f"inserted CALLS.id={call_id} step={payload.step_name} run_id={payload.run_id}")
 

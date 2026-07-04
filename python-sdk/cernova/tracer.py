@@ -12,9 +12,12 @@ from urllib import request as _urllib_request
 
 _DEFAULT_URL = "https://trace-production-940c.up.railway.app"
 
+# Version of the ingest wire format this SDK speaks.
+_SCHEMA_VERSION = 1
+
 # ContextVar so run_id propagates automatically across async/threaded code
-_active_run_id: ContextVar[str | None] = ContextVar("traceai_run_id", default=None)
-_active_step_index: ContextVar[int] = ContextVar("traceai_step_index", default=0)
+_active_run_id: ContextVar[str | None] = ContextVar("cernova_run_id", default=None)
+_active_step_index: ContextVar[int] = ContextVar("cernova_step_index", default=0)
 
 
 def _new_uuid() -> str:
@@ -23,7 +26,7 @@ def _new_uuid() -> str:
 
 class Tracer:
     """
-    trace.ai Python client.
+    Cernova Python client.
 
     Usage::
 
@@ -44,12 +47,12 @@ class Tracer:
             output_code="billing",
         )
 
-        # LangChain — see traceai.langchain.TraceAICallbackHandler
+        # LangChain — see cernova.langchain.CernovaCallbackHandler
     """
 
     def __init__(self, api_key: str, api_url: str = "") -> None:
         self.api_key = api_key
-        # Empty string falls back to default so that os.environ.get("TRACE_API_URL", "")
+        # Empty string falls back to default so that os.environ.get("CERNOVA_API_URL", "")
         # behaves the same as not passing api_url at all.
         self.api_url = (api_url or _DEFAULT_URL).rstrip("/")
 
@@ -57,7 +60,8 @@ class Tracer:
 
     def ingest(self, **fields: Any) -> None:
         """Fire-and-forget POST to /ingest. Never raises — failures are silent."""
-        threading.Thread(target=self._post, args=(fields,), daemon=True).start()
+        payload = {"schema_version": _SCHEMA_VERSION, **fields}
+        threading.Thread(target=self._post, args=(payload,), daemon=True).start()
 
     def _post(self, payload: dict[str, Any]) -> None:
         try:

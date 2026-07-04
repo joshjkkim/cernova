@@ -5,7 +5,7 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from db import check_connection
-from routers import ingest, traces, projects, calls, anomalies, analyze
+from routers import ingest, traces, projects, calls, anomalies, analyze, otel, feedback
 
 sentry_sdk.init(
     dsn=os.environ.get("SENTRY_DSN"),
@@ -33,10 +33,12 @@ app.include_router(projects.router)      # ADD THIS
 app.include_router(calls.router)
 app.include_router(anomalies.router)
 app.include_router(analyze.router)
+app.include_router(otel.router)
+app.include_router(feedback.router)
 
 @app.get("/debug-sentry")
 def debug_sentry() -> dict:
-    raise ValueError("Sentry test error from trace.ai backend")
+    raise ValueError("Sentry test error from Cernova backend")
 
 @app.get("/health")
 def health() -> dict:

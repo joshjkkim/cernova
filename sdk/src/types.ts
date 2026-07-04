@@ -10,11 +10,13 @@ export interface TraceOptions {
 export interface TraceConfig {
   apiKey: string;
   runId?: string;
-  /** Override the ingest endpoint. Defaults to trace-ai's servers. For local dev only. */
+  /** Override the ingest endpoint. Defaults to cernova's servers. For local dev only. */
   apiUrl?: string;
 }
 
 export interface TracePayload {
+  /** Wire-format version. Injected by Tracer.ingest — callers never set it. */
+  schema_version?: number;
   run_id: string;
   step_name: string;
   step_index: number;

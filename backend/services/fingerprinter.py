@@ -1,7 +1,7 @@
 """
 Step fingerprinting — semantic identity for LLM calls.
 
-On every ingest, extract the stable instruction part of the prompt, embed it
+On every ingest, embed the stable instruction kernel (CanonicalTrace.kernel())
 with a local sentence-transformers model, and match against known step profiles
 for this project using pgvector cosine similarity.
 
@@ -11,9 +11,6 @@ Three outcomes:
   new      — similarity < 0.75, genuinely new step, create profile
 """
 
-import json
-
-from anomaly.prompt_kernel import extract_system_prompt
 from db import get_client
 from services.embedding_service import embed
 
@@ -21,32 +18,30 @@ MATCH_THRESHOLD = 0.92
 EVOLVED_THRESHOLD = 0.75
 
 
-def _derive_step_name(prompt_json: str) -> str | None:
+def _derive_step_name(system_text: str | None) -> str | None:
     """Auto-generate a readable step name from the system prompt if no name was given."""
-    try:
-        obj = json.loads(prompt_json)
-        system = obj.get("system") if isinstance(obj, dict) else None
-        if not system:
-            return None
-        words = str(system).split()[:4]
-        slug = "-".join(words).lower()
-        slug = "".join(c if c.isalnum() or c == "-" else "" for c in slug)
-        return slug[:40] or None
-    except (ValueError, TypeError):
+    if not system_text:
         return None
+    words = system_text.split()[:4]
+    slug = "-".join(words).lower()
+    slug = "".join(c if c.isalnum() or c == "-" else "" for c in slug)
+    return slug[:40] or None
 
 
 def match_or_create_profile(
     project_id: str,
     step_name: str,
-    prompt_json: str,
+    kernel: str,
+    system_text: str | None = None,
 ) -> tuple[str | None, str]:
     """
+    Match the pre-extracted instruction kernel (CanonicalTrace.kernel()) against
+    this project's step profiles.
+
     Returns (step_profile_id, status) where status is 'matched', 'evolved', or 'new'.
     Returns (None, 'error') if anything fails — ingest should continue regardless.
     """
     try:
-        kernel = extract_system_prompt(prompt_json)
         embedding = embed(kernel)
         db = get_client()
 
@@ -72,7 +67,7 @@ def match_or_create_profile(
             return profile_id, status
 
         display_name = step_name if not step_name.startswith("step_") else (
-            _derive_step_name(prompt_json) or step_name
+            _derive_step_name(system_text) or step_name
         )
         res = db.table("step_profiles").insert({
             "project_id": project_id,

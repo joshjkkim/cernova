@@ -3,8 +3,10 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-# Matches CALLS columns (excluding auto-generated id, created_at).
+# Cernova SDK wire format (v1). Mapped to CanonicalTrace by adapters/cernova.py —
+# only the adapter should consume this shape.
 class IngestPayload(BaseModel):
+    schema_version: int = 1  # defaulted server-side for SDKs that predate the field
     step_name: str
     model: str
     prompt: str = Field(..., description="Exact user prompt string")

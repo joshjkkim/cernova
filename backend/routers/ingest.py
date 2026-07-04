@@ -1,9 +1,10 @@
-import json
 import threading
 from fastapi import APIRouter, Request, HTTPException
 import sentry_sdk
 from sentry_sdk import Client as SentryClient, Scope
 
+from adapters import to_canonical
+from schemas.canonical import CanonicalTrace
 from schemas.trace import IngestPayload, IngestResponse
 from services.trace_service import ingest_trace
 from services.slack_service import (
@@ -36,7 +37,7 @@ def _resolve_project(api_key: str) -> dict | None:
         return None
 
 
-def _fire_slack(project: dict, payload: IngestPayload) -> None:
+def _fire_slack(project: dict, payload: CanonicalTrace) -> None:
     """Run in a background thread so it never blocks the ingest response."""
     webhook = project.get("slack_webhook_url")
     if not webhook:
@@ -83,7 +84,7 @@ def _fire_slack(project: dict, payload: IngestPayload) -> None:
 
 
 def _fire_user_sentry_performance(
-    dsn: str, payload: IngestPayload, anomaly_score: float, triggered: bool, project_name: str
+    dsn: str, payload: CanonicalTrace, anomaly_score: float, triggered: bool, project_name: str
 ) -> None:
     """Send a Sentry Performance transaction for every LLM call — not just anomalous ones.
     Steps in the same run share a trace_id so Sentry can reconstruct the full pipeline."""
@@ -96,7 +97,7 @@ def _fire_user_sentry_performance(
         start = now - datetime.timedelta(milliseconds=payload.latency_ms or 0)
 
         # Deterministic trace_id from run_id so all steps in a run share the same trace
-        trace_id   = _uuid.uuid5(_uuid.NAMESPACE_URL, f"trace-ai:{payload.run_id}").hex  # 32 hex
+        trace_id   = _uuid.uuid5(_uuid.NAMESPACE_URL, f"cernova:{payload.run_id}").hex  # 32 hex
         span_id    = _uuid.uuid4().hex[:16]
         child_span = _uuid.uuid4().hex[:16]
         status     = "ok" if payload.status_success else "internal_error"
@@ -114,10 +115,10 @@ def _fire_user_sentry_performance(
                     "op": "ai.inference",
                     "status": status,
                     "data": {
-                        "trace_ai.run_id": payload.run_id,
-                        "trace_ai.project": project_name,
-                        "trace_ai.anomaly_score": anomaly_score,
-                        "trace_ai.triggered": triggered,
+                        "cernova.run_id": payload.run_id,
+                        "cernova.project": project_name,
+                        "cernova.anomaly_score": anomaly_score,
+                        "cernova.triggered": triggered,
                     },
                 }
             },
@@ -149,13 +150,13 @@ def _fire_user_sentry_performance(
                 "anomaly_score": {"value": anomaly_score,                                  "unit": "none"},
             },
             "tags": {
-                "trace_ai.run_id":     payload.run_id,
-                "trace_ai.model":      payload.model or "unknown",
-                "trace_ai.step":       payload.step_name or "unknown",
-                "trace_ai.step_index": str(payload.step_index or 0),
-                "trace_ai.project":    project_name,
-                "trace_ai.success":    str(payload.status_success),
-                "trace_ai.triggered":  str(triggered),
+                "cernova.run_id":     payload.run_id,
+                "cernova.model":      payload.model or "unknown",
+                "cernova.step":       payload.step_name or "unknown",
+                "cernova.step_index": str(payload.step_index or 0),
+                "cernova.project":    project_name,
+                "cernova.success":    str(payload.status_success),
+                "cernova.triggered":  str(triggered),
             },
             "level": "error" if triggered else "info",
         }
@@ -168,7 +169,7 @@ def _fire_user_sentry_performance(
         print(f"[ingest] sentry performance failed: {exc}")
 
 
-def _fire_user_sentry(dsn: str, payload: IngestPayload, result, project_name: str) -> None:
+def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: str) -> None:
     """Send an anomaly event to the user's own Sentry project."""
     try:
         user_client = SentryClient(dsn=dsn, default_integrations=False)
@@ -176,19 +177,19 @@ def _fire_user_sentry(dsn: str, payload: IngestPayload, result, project_name: st
             f"{code}+{int(pts)}pts" for code, pts in result.error_map.items()
         )
         scope = Scope()
-        scope.set_tag("trace_ai.project", project_name)
-        scope.set_tag("trace_ai.step", payload.step_name)
-        scope.set_tag("trace_ai.model", payload.model)
-        scope.set_tag("trace_ai.layer", str(result.stopped_at_layer))
+        scope.set_tag("cernova.project", project_name)
+        scope.set_tag("cernova.step", payload.step_name)
+        scope.set_tag("cernova.model", payload.model)
+        scope.set_tag("cernova.layer", str(result.stopped_at_layer))
         scope.set_extra("run_id", payload.run_id)
         scope.set_extra("total_score", result.total_score)
         scope.set_extra("threshold", result.threshold)
         scope.set_extra("error_map", dict(result.error_map))
-        scope.fingerprint = ["trace-ai", "anomaly", payload.step_name or "unknown"]
+        scope.fingerprint = ["cernova", "anomaly", payload.step_name or "unknown"]
         level = "error" if result.triggered else "warning"
         event_id = user_client.capture_event(
             {
-                "message": f"[trace.ai] {'Critical anomaly' if result.triggered else 'Anomaly warning'} in '{payload.step_name}' — {result.total_score}pts ({codes_summary})",
+                "message": f"[Cernova] {'Critical anomaly' if result.triggered else 'Anomaly warning'} in '{payload.step_name}' — {result.total_score}pts ({codes_summary})",
                 "level": level,
             },
             scope=scope,
@@ -197,24 +198,6 @@ def _fire_user_sentry(dsn: str, payload: IngestPayload, result, project_name: st
         print(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
     except Exception as exc:
         print(f"[ingest] user sentry fire failed: {exc}")
-
-
-def _extract_instruction(prompt: str) -> str:
-    """If the prompt is SDK-format JSON {system, messages}, return the readable instruction text.
-    Prevents JSON wrapper keys/words from confusing L2/L3 format checks."""
-    try:
-        obj = json.loads(prompt)
-        if isinstance(obj, dict) and "messages" in obj:
-            parts = []
-            if obj.get("system"):
-                parts.append(str(obj["system"]))
-            for msg in obj.get("messages", []):
-                if isinstance(msg, dict) and msg.get("role") == "user":
-                    parts.append(str(msg.get("content", "")))
-            return "\n".join(parts)
-    except (ValueError, TypeError):
-        pass
-    return prompt
 
 
 def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> dict[str, float] | None:
@@ -262,7 +245,7 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
 
 
 def _run_anomaly_detection(
-    payload: IngestPayload,
+    payload: CanonicalTrace,
     project: dict | None,
     step_profile_id: str | None = None,
     trace_id: str | None = None,
@@ -273,12 +256,24 @@ def _run_anomaly_detection(
     """Run in a background thread — score the call and persist any anomalies."""
     try:
         from anomaly.config import EvalConfig
-        call_input = CallInput.model_validate({
-            **payload.model_dump(),
-            "prompt": _extract_instruction(payload.prompt),
-            "system_prompt": system_prompt,
-            "behavior_vector": behavior_vector,
-        })
+        call_input = CallInput(
+            step_name=payload.step_name,
+            model=payload.model,
+            prompt=payload.instruction_text(),
+            system_prompt=system_prompt,
+            behavior_vector=behavior_vector,
+            input_tokens=payload.input_tokens,
+            output_tokens=payload.output_tokens,
+            reasoning_tokens=payload.reasoning_tokens,
+            total_tokens=payload.total_tokens,
+            latency_ms=payload.latency_ms,
+            cost=payload.cost,
+            status_success=payload.status_success,
+            error=payload.error,
+            output_code=payload.output_text,
+            run_id=payload.run_id,
+            project_id=payload.project_id,
+        )
         config = EvalConfig()
         if project:
             mode = project.get("threshold_mode", "dynamic")
@@ -314,6 +309,25 @@ def _run_anomaly_detection(
                 config = EvalConfig(**{**config.model_dump(), "behavior_baseline": behavior_baseline})
                 print(f"[anomaly] L3 behavior baseline for profile={step_profile_id}: n={behavior_baseline.sample_count}")
         result = evaluate_call(call_input, config)
+
+        # Contract check: compare this output against the step's learned contract.
+        # Enforced hard violations fold into the anomaly score; proposed contracts
+        # are checked and logged only (never silently fabricate an anomaly).
+        if step_profile_id:
+            try:
+                from services.contract_service import load_contract, evaluate_contract
+                contract = load_contract(step_profile_id)
+                if contract:
+                    check, contract_codes = evaluate_contract(contract, payload.output_text)
+                    print(f"[contract] profile={step_profile_id} status={contract.status} "
+                          f"passed={check.passed} violations={[v.code for v in check.violations]}")
+                    if contract_codes:
+                        for code, penalty in contract_codes.items():
+                            result.error_map[code] = penalty
+                        result.total_score += sum(contract_codes.values())
+                        result.triggered = result.total_score >= result.threshold
+            except Exception as exc:
+                print(f"[contract] check failed for profile={step_profile_id}: {exc}")
 
         # Mark the CALLS row so it's excluded from future baselines
         if result.triggered and trace_id:
@@ -370,7 +384,7 @@ def _run_anomaly_detection(
         print(f"[ingest] anomaly detection failed for run {payload.run_id}: {exc}")
 
 
-def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, trace_id: str) -> None:
+def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str) -> None:
     """Fingerprint first to get step_profile_id, then run anomaly detection with it.
     Keeps them in one thread so anomaly detection gets per-step baselines."""
     step_profile_id: str | None = None
@@ -388,11 +402,12 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
             from services.embedding_service import embed
             from services.fingerprinter import match_or_create_profile
 
-            system_prompt = extract_system_prompt(payload.prompt)
+            system_prompt = payload.system or extract_system_prompt(payload.raw_prompt)
             profile_id, profile_status = match_or_create_profile(
                 project_id=payload.project_id,
                 step_name=payload.step_name,
-                prompt_json=payload.prompt,
+                kernel=payload.kernel(),
+                system_text=payload.system,
             )
             if profile_id:
                 step_profile_id = profile_id
@@ -406,11 +421,23 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
                         {"goal_type": goal_type}
                     ).eq("id", profile_id).execute()
 
-                call_input = CallInput.model_validate({
-                    **payload.model_dump(),
-                    "prompt": _extract_instruction(payload.prompt),
-                    "system_prompt": system_prompt,
-                })
+                call_input = CallInput(
+                    step_name=payload.step_name,
+                    model=payload.model,
+                    prompt=payload.instruction_text(),
+                    system_prompt=system_prompt,
+                    input_tokens=payload.input_tokens,
+                    output_tokens=payload.output_tokens,
+                    reasoning_tokens=payload.reasoning_tokens,
+                    total_tokens=payload.total_tokens,
+                    latency_ms=payload.latency_ms,
+                    cost=payload.cost,
+                    status_success=payload.status_success,
+                    error=payload.error,
+                    output_code=payload.output_text,
+                    run_id=payload.run_id,
+                    project_id=payload.project_id,
+                )
                 behavior_vector = build_behavior_vector(
                     call_input, embed, system_prompt=system_prompt, goal_type=goal_type,
                 )
@@ -429,6 +456,30 @@ def _run_fingerprint_then_anomaly(payload: IngestPayload, project: dict | None, 
         system_prompt=system_prompt,
     )
 
+    # Induce/refresh the step's output contract from history for future calls.
+    if step_profile_id:
+        try:
+            from services.contract_service import maybe_learn_contract
+            maybe_learn_contract(step_profile_id)
+        except Exception as exc:
+            print(f"[contract] induction failed for profile={step_profile_id}: {exc}")
+
+
+def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:
+    """Persist a canonical trace and kick off fingerprinting, anomaly detection,
+    and Slack alerts in background threads. Shared entry point for every ingest
+    source (SDK payloads, OTLP, imports). Returns the new CALLS row id."""
+    trace.project_id = project["id"] if project else None
+
+    trace_id = ingest_trace(trace)
+
+    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
+
+    if project:
+        threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
+
+    return trace_id
+
 
 @router.post("/ingest", response_model=IngestResponse)
 def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
@@ -439,13 +490,9 @@ def ingest(request: Request, payload: IngestPayload) -> IngestResponse:
         raise HTTPException(status_code=401, detail="Missing API key")
 
     project = _resolve_project(api_key)
-    payload.project_id = project["id"] if project else None
 
-    trace_id = ingest_trace(payload)
-
-    threading.Thread(target=_run_fingerprint_then_anomaly, args=(payload, project, trace_id), daemon=True).start()
-
-    if project:
-        threading.Thread(target=_fire_slack, args=(project, payload), daemon=True).start()
+    # Wire format → canonical. Everything downstream consumes only CanonicalTrace.
+    trace = to_canonical(payload)
+    trace_id = process_canonical(trace, project)
 
     return IngestResponse(trace_id=trace_id)
