@@ -11,11 +11,18 @@ Three outcomes:
   new      — similarity < 0.75, genuinely new step, create profile
 """
 
+import threading
+
 from db import get_client
 from services.embedding_service import embed
 
 MATCH_THRESHOLD = 0.92
 EVOLVED_THRESHOLD = 0.75
+
+# Serialize match-or-create per process: concurrent ingest threads that embed
+# the same kernel would otherwise all miss the RPC before any INSERT commits
+# and create duplicate profiles (thundering herd on cold start).
+_profile_lock = threading.Lock()
 
 
 def _derive_step_name(system_text: str | None) -> str | None:
@@ -45,6 +52,16 @@ def match_or_create_profile(
         embedding = embed(kernel)
         db = get_client()
 
+        with _profile_lock:
+            return _match_or_create_locked(db, embedding, project_id, step_name, system_text)
+    except Exception as exc:
+        print(f"[fingerprint] failed for project={project_id} step={step_name}: {exc}")
+        return None, "error"
+
+
+def _match_or_create_locked(
+    db, embedding: list[float], project_id: str, step_name: str, system_text: str | None
+) -> tuple[str | None, str]:
         result = db.rpc("match_step_profile", {
             "p_project_id": project_id,
             "p_embedding": embedding,
@@ -78,7 +95,3 @@ def match_or_create_profile(
         profile_id = res.data[0]["id"]
         print(f"[fingerprint] new step profile: {display_name} id={profile_id}")
         return profile_id, "new"
-
-    except Exception as exc:
-        print(f"[fingerprint] failed for project={project_id} step={step_name}: {exc}")
-        return None, "error"

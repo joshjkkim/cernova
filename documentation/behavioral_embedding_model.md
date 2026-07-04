@@ -1,5 +1,7 @@
 # Behavioral Embedding Model (L3)
 
+> Backend planning doc: [`backend/documentation/BEHAVIORAL_L3.md`](../backend/documentation/BEHAVIORAL_L3.md)
+
 **Branch:** `new_anomaly_model` (uncommitted work)  
 **Base commit:** `9dbd2e2` — Merge pull request #8 (langchain_package)  
 **Status:** Implementation complete in working tree; migration must be applied manually in Supabase before production use.

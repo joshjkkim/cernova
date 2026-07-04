@@ -1,4 +1,4 @@
-1"""Compute per-step-profile behavioral centroids from stored behavior vectors.
+"""Compute per-step-profile behavioral centroids from stored behavior vectors.
 
 Mirrors baseline_service filters: same model, post last_evolved_at, exclude
 anomaly_triggered calls. Requires MIN_SAMPLES stored vectors.

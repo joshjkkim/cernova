@@ -29,6 +29,18 @@ VECTOR_DIM = EMBED_DIM * 2 + NUMERIC_DIM + GOAL_DIM  # 778
 
 OUTPUT_MAX_CHARS = 500
 
+# Per-block weights. Each block is L2-normalized to unit length first, then
+# scaled — without this the raw log1p numeric block (values ~5-8 vs unit-norm
+# embeddings) carries ~98% of the final vector's mass and drowns out the
+# semantic signal entirely. Output gets the highest weight: the prompt and
+# goal blocks are identical for every call on the same step (they only move
+# on prompt drift), so output style must be able to push cosine distance past
+# the 0.35 threshold on its own.
+PROMPT_WEIGHT = 1.0
+OUTPUT_WEIGHT = 2.0
+NUMERIC_WEIGHT = 1.0
+GOAL_WEIGHT = 0.5
+
 
 # --- Goal type: the one-hot tail of the fingerprint ------------------------
 
@@ -75,6 +87,10 @@ def _l2_normalize(vec: list[float]) -> list[float]:
     if norm < 1e-12:
         return vec
     return [x / norm for x in vec]
+
+
+def _scale(vec: list[float], weight: float) -> list[float]:
+    return [x * weight for x in vec]
 
 
 def _goal_one_hot(goal_type: str) -> list[float]:
@@ -132,7 +148,13 @@ def build_behavior_vector(
     goal = goal_type or classify_goal_type(prompt_text)
     goal_vec = _goal_one_hot(goal)
 
-    return _l2_normalize([*prompt_embed, *output_embed, *numeric, *goal_vec])
+    blocks = [
+        _scale(_l2_normalize(prompt_embed), PROMPT_WEIGHT),
+        _scale(_l2_normalize(output_embed), OUTPUT_WEIGHT),
+        _scale(_l2_normalize(numeric), NUMERIC_WEIGHT),
+        _scale(_l2_normalize(goal_vec), GOAL_WEIGHT),
+    ]
+    return _l2_normalize([x for block in blocks for x in block])
 
 
 def cosine_distance(a: list[float], b: list[float]) -> float:
