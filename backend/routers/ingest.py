@@ -295,6 +295,25 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                 print(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
         result = evaluate_call(call_input, config)
 
+        # Contract check: compare this output against the step's learned contract.
+        # Enforced hard violations fold into the anomaly score; proposed contracts
+        # are checked and logged only (never silently fabricate an anomaly).
+        if step_profile_id:
+            try:
+                from services.contract_service import load_contract, evaluate_contract
+                contract = load_contract(step_profile_id)
+                if contract:
+                    check, contract_codes = evaluate_contract(contract, payload.output_text)
+                    print(f"[contract] profile={step_profile_id} status={contract.status} "
+                          f"passed={check.passed} violations={[v.code for v in check.violations]}")
+                    if contract_codes:
+                        for code, penalty in contract_codes.items():
+                            result.error_map[code] = penalty
+                        result.total_score += sum(contract_codes.values())
+                        result.triggered = result.total_score >= result.threshold
+            except Exception as exc:
+                print(f"[contract] check failed for profile={step_profile_id}: {exc}")
+
         # Mark the CALLS row so it's excluded from future baselines
         if result.triggered and trace_id:
             try:
@@ -373,6 +392,14 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
             print(f"[fingerprint] failed: {exc}")
 
     _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id)
+
+    # Induce/refresh the step's output contract from history for future calls.
+    if step_profile_id:
+        try:
+            from services.contract_service import maybe_learn_contract
+            maybe_learn_contract(step_profile_id)
+        except Exception as exc:
+            print(f"[contract] induction failed for profile={step_profile_id}: {exc}")
 
 
 def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:

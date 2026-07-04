@@ -63,7 +63,7 @@ print("✓ message serialization")
 
 # ── 5. Callback handler — ingest payload shape ────────────────────────────────
 
-tracer = Tracer(api_key="trace_test", api_url="http://localhost:9999")
+tracer = Tracer(api_key="trace_sZY1u4Br0fmX2qVj9AJOYHAJVkVXMYgR", api_url="http://localhost:9999")
 handler = CernovaCallbackHandler(tracer)
 
 ingested = []

@@ -97,6 +97,25 @@ _L2: list[ConditionDef] = [
         "Prompt asks a yes/no question but output is not a bare yes or no.",
         "layer_2_regex.run_layer_2_regex:yes_no_contract",
     ),
+    # Learned-contract violations. Unlike 2001-2004 (inferred from the prompt),
+    # these fire against a contract induced from the step's own output history
+    # (services/contract_checker). Injected into the result by the ingest
+    # pipeline, not by a layer — only when the contract is 'enforced'.
+    ConditionDef(
+        2010, "L2_format", "contract_format_not_json", 50.0,
+        "Learned contract expects a JSON object but output was unparseable or non-object.",
+        "contract_checker.check_output:format_not_json",
+    ),
+    ConditionDef(
+        2011, "L2_format", "contract_missing_required_key", 40.0,
+        "Output is missing a key the step's learned contract marks as always present.",
+        "contract_checker.check_output:missing_required_key",
+    ),
+    ConditionDef(
+        2012, "L2_format", "contract_wrong_type", 40.0,
+        "A key's value type differs from the type learned for this step.",
+        "contract_checker.check_output:wrong_type",
+    ),
 ]
 
 # --- L4 integers: static numeric limits plus cross-field plausibility. Reads
