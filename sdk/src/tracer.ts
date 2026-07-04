@@ -1,13 +1,7 @@
 import type { TraceConfig, TracePayload } from './types';
 import { wrapAnthropic, type TracedAnthropic, type AnthropicClientLike } from './wrappers/anthropic';
 import { wrapOpenAI, type TracedOpenAI, type OpenAIClientLike } from './wrappers/openai';
-
-function uuid(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
-}
+import { uuid } from './uuid';
 
 const DEFAULT_API_URL = 'https://trace-production-940c.up.railway.app';
 

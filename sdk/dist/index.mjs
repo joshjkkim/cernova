@@ -39,13 +39,15 @@ function runWithSpan(spanId, fn) {
   return spanStorage.run({ spanId }, fn);
 }
 
-// src/run.ts
+// src/uuid.ts
 function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
     const r = Math.random() * 16 | 0;
     return (c === "x" ? r : r & 3 | 8).toString(16);
   });
 }
+
+// src/run.ts
 function extractOutputCode(response) {
   const text = response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
   return text.length > 0 ? text : void 0;
@@ -174,12 +176,6 @@ var TracedRun = class {
 };
 
 // src/wrappers/anthropic.ts
-function uuid2() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    return (c === "x" ? r : r & 3 | 8).toString(16);
-  });
-}
 function extractOutputCode2(response) {
   const text = response.content.filter((b) => b.type === "text").map((b) => b.text).join("");
   return text.length > 0 ? text : void 0;
@@ -192,7 +188,7 @@ function wrapAnthropic(client, tracer) {
         const { _trace, ...cleanParams } = params;
         const currentStep = stepIndex++;
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
-        const spanId = uuid2();
+        const spanId = uuid();
         const parentSpanId = getActiveSpanId();
         const start = Date.now();
         try {
@@ -248,7 +244,7 @@ function wrapAnthropic(client, tracer) {
         const { _trace, ...cleanParams } = params;
         const currentStep = stepIndex++;
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
-        const spanId = uuid2();
+        const spanId = uuid();
         const parentSpanId = getActiveSpanId();
         const start = Date.now();
         if (!client.messages.stream) {
@@ -306,12 +302,6 @@ function wrapAnthropic(client, tracer) {
 }
 
 // src/wrappers/openai.ts
-function uuid3() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    return (c === "x" ? r : r & 3 | 8).toString(16);
-  });
-}
 function extractSystemAndMessages(messages) {
   const system = messages.find((m) => m.role === "system")?.content ?? void 0;
   return { system: system ?? void 0, messages };
@@ -329,7 +319,7 @@ function wrapOpenAI(client, tracer) {
           const { _trace, ...cleanParams } = params;
           const currentStep = stepIndex++;
           const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
-          const spanId = uuid3();
+          const spanId = uuid();
           const parentSpanId = getActiveSpanId();
           const start = Date.now();
           const { system, messages } = extractSystemAndMessages(params.messages);
@@ -388,19 +378,13 @@ function wrapOpenAI(client, tracer) {
 }
 
 // src/tracer.ts
-function uuid4() {
-  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    return (c === "x" ? r : r & 3 | 8).toString(16);
-  });
-}
 var DEFAULT_API_URL = "https://trace-production-940c.up.railway.app";
 var SCHEMA_VERSION = 1;
 var Tracer = class {
   constructor(config) {
     this.apiUrl = (config.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
     this.apiKey = config.apiKey;
-    this.runId = config.runId ?? uuid4();
+    this.runId = config.runId ?? uuid();
   }
   ingest(payload) {
     return fetch(`${this.apiUrl}/ingest`, {
