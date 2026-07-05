@@ -370,6 +370,14 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                         condition_names=condition_names,
                         triggered=result.triggered,
                     )
+
+            # Generic outbound webhook — the "alerts out to anywhere" sink.
+            out_webhook = project.get("webhook_url") if project else None
+            webhook_level = (project.get("webhook_anomaly_level") or "critical") if project else "critical"
+            if not suppress_alerts and out_webhook and webhook_level != "none":
+                if webhook_level == "warning" or result.triggered:
+                    from services.webhook_service import send_anomaly_webhook
+                    send_anomaly_webhook(out_webhook, project.get("webhook_secret"), payload, result, project)
     except Exception:
         log.error(f"[ingest] anomaly detection failed for run {payload.run_id}", exc_info=True)
 

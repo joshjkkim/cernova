@@ -601,6 +601,35 @@ function SectionIntegrations() {
         Performance spans follow <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenTelemetry GenAI semantic conventions</a> — gen_ai.usage.input_tokens, gen_ai.system: &quot;anthropic&quot; — compatible with Sentry&apos;s native AI monitoring.
       </Callout>
 
+      <H2>Webhooks</H2>
+      <P>Send the structured anomaly event to any endpoint — PagerDuty, Opsgenie, n8n, or your own automation. Set a <strong className="text-gray-300">Webhook URL</strong> in project Settings; Cernova POSTs this payload whenever an anomaly fires, at the delivery level you choose (critical only, warning + critical, or off).</P>
+      <Code lang="json">{`{
+  "schema_version": 1,
+  "type": "anomaly",
+  "event_id": "9f2c…",
+  "timestamp": "2026-07-05T01:00:00+00:00",
+  "project_id": "…",
+  "project_name": "support-agent",
+  "run_id": "a3f9…",
+  "step_name": "generate-reply",
+  "model": "claude-haiku-4-5",
+  "total_score": 110,
+  "threshold": 100,
+  "triggered": true,
+  "codes": [
+    { "code": 5001, "name": "latency_iqr_fence", "penalty": 30 }
+  ]
+}`}</Code>
+      <P>Every request is signed. The <code className="text-violet-400 font-mono">X-Cernova-Signature</code> header is <code className="text-violet-400 font-mono">sha256=</code> followed by the HMAC-SHA256 of the raw request body, keyed with your project&apos;s signing secret (shown in Settings once a URL is saved). Verify it before trusting the payload:</P>
+      <Code lang="python">{`import hashlib, hmac
+
+def verify(secret: str, body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)`}</Code>
+      <Callout type="info">
+        The payload is versioned via <code className="text-gray-300">schema_version</code> — fields may be added; renames or removals bump the version. Use the <strong className="text-gray-300">Test</strong> button in Settings to fire a synthetic event at your endpoint.
+      </Callout>
+
       <H2>OpenTelemetry</H2>
       <P>Already emitting OpenTelemetry GenAI spans — via <a href="https://github.com/traceloop/openllmetry" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenLLMetry</a>, Traceloop, or native instrumentation? Point your OTLP exporter at Cernova and every LLM span flows into the same detection pipeline — no SDK, no code change. Cernova reads the <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">GenAI semantic conventions</a> and ignores non-LLM spans.</P>
       <Code lang="bash">{`# Point any OTLP exporter at Cernova
@@ -639,7 +668,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
       <P>Planned integrations, in rough priority order:</P>
       <Rows items={[
         { key: 'LangSmith import', label: 'traces in', color: 'text-gray-400', value: 'The same warm-start import for LangSmith run history — one adapter away.' },
-        { key: 'Webhooks',         label: 'alerts out', color: 'text-gray-400', value: 'Generic webhook destination posting the structured anomaly payload anywhere — PagerDuty, Opsgenie, your own automation.' },
+        { key: 'Read API',         label: 'data out',  color: 'text-gray-400', value: 'Pull traces, anomalies, and contracts programmatically with your project API key.' },
       ]} />
     </div>
   );

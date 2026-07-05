@@ -26,6 +26,9 @@ interface Project {
   threshold_tokens?: number | null;
   threshold_cost?: number | null;
   monthly_budget_usd?: number | null;
+  webhook_url?: string | null;
+  webhook_secret?: string | null;
+  webhook_anomaly_level?: string | null;
 }
 
 interface Call {
@@ -1581,6 +1584,10 @@ function SettingsTab({ project }: { project: Project }) {
   const [sentryLevel, setSentryLevel] = useState<'critical' | 'warning' | 'none'>((project.sentry_alert_level as 'critical' | 'warning' | 'none') ?? 'critical');
   const [slackAnomalyLevel, setSlackAnomalyLevel] = useState<'critical' | 'warning' | 'none'>((project.slack_anomaly_level as 'critical' | 'warning' | 'none') ?? 'critical');
   const [budget, setBudget]         = useState(project.monthly_budget_usd?.toString() ?? '');
+  const [webhookUrl, setWebhookUrl] = useState(project.webhook_url ?? '');
+  const [webhookLevel, setWebhookLevel] = useState<'critical' | 'warning' | 'none'>((project.webhook_anomaly_level as 'critical' | 'warning' | 'none') ?? 'critical');
+  const [webhookSecret, setWebhookSecret] = useState(project.webhook_secret ?? '');
+  const [testingOut, setTestingOut] = useState(false);
   const [thresholdMode, setThresholdMode] = useState<'dynamic' | 'manual'>((project.threshold_mode as 'dynamic' | 'manual') ?? 'dynamic');
   const [manualLatency, setManualLatency] = useState(project.threshold_latency_ms?.toString() ?? '');
   const [manualTokens, setManualTokens]   = useState(project.threshold_tokens?.toString() ?? '');
@@ -1615,9 +1622,13 @@ function SettingsTab({ project }: { project: Project }) {
           threshold_tokens: thresholdMode === 'manual' && manualTokens ? parseFloat(manualTokens) : null,
           threshold_cost: thresholdMode === 'manual' && manualCost ? parseFloat(manualCost) : null,
           monthly_budget_usd: budget ? parseFloat(budget) : null,
+          webhook_url: webhookUrl.trim() || null,
+          webhook_anomaly_level: webhookLevel,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
+      const updated = await res.json().catch(() => null);
+      if (updated?.webhook_secret) setWebhookSecret(updated.webhook_secret);
       setMsg({ ok: true, text: 'Saved.' });
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
@@ -1636,6 +1647,19 @@ function SettingsTab({ project }: { project: Project }) {
       setMsg({ ok: false, text: String(e) });
     } finally {
       setTesting(false);
+    }
+  }
+
+  async function testOutbound() {
+    setTestingOut(true); setMsg(null);
+    try {
+      const res = await fetch(`${BACKEND_URL}/projects/${project.id}/outbound-webhook/test`, { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+      setMsg({ ok: true, text: 'Test event delivered — check your endpoint.' });
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setTestingOut(false);
     }
   }
 
@@ -1734,6 +1758,44 @@ function SettingsTab({ project }: { project: Project }) {
               {sentryLevel === 'none'      && 'Sentry DSN saved but no events will be forwarded.'}
             </p>
           </Field>
+        </div>
+      </SettingSection>
+
+      <SettingSection
+        title="Outbound webhook"
+        description="POST the structured anomaly event to any endpoint — PagerDuty, n8n, your own automation. Signed with a per-project HMAC key so you can verify it's really from Cernova."
+      >
+        <div className="space-y-4">
+          <Field label="Webhook URL">
+            <div className="flex gap-2">
+              <input
+                type="url" value={webhookUrl} onChange={e => setWebhookUrl(e.target.value)}
+                placeholder="https://your-endpoint.example.com/hook"
+                className={inputCls}
+              />
+              <button
+                onClick={testOutbound} disabled={testingOut || !webhookUrl.trim()}
+                className="px-4 py-2 font-mono text-xs border border-white/8 text-gray-400 hover:bg-white/4 disabled:opacity-40 transition-colors shrink-0"
+              >
+                {testingOut ? 'sending…' : 'test'}
+              </button>
+            </div>
+            <p className="font-mono text-[10px] text-gray-700 mt-1.5">Save first, then test — the test reads the saved URL.</p>
+          </Field>
+          <Field label="Deliver when">
+            <SegmentedControl options={alertLevelOptions} value={webhookLevel} onChange={setWebhookLevel} />
+            <p className="font-mono text-[10px] text-gray-700 mt-2">
+              {webhookLevel === 'critical' && 'Delivers when run score crosses the threshold (≥ 100pts).'}
+              {webhookLevel === 'warning'  && 'Delivers on any anomaly hit, even below threshold.'}
+              {webhookLevel === 'none'      && 'Webhook saved but nothing is delivered.'}
+            </p>
+          </Field>
+          {webhookSecret && (
+            <Field label="Signing secret">
+              <code className="block bg-black border border-white/8 px-3 py-2 font-mono text-[11px] text-gray-400 break-all">{webhookSecret}</code>
+              <p className="font-mono text-[10px] text-gray-700 mt-1.5">Verify the <span className="text-gray-500">X-Cernova-Signature</span> header: <span className="text-gray-500">sha256=HMAC_SHA256(secret, raw_body)</span>.</p>
+            </Field>
+          )}
         </div>
       </SettingSection>
 

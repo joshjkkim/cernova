@@ -456,6 +456,7 @@ export default function LandingPage() {
               ['LangChain', 'python · any provider', 'in', true], ['OpenTelemetry', 'genai ingest', 'in', true],
               ['Vercel AI SDK', 'telemetry ingest', 'in', true], ['Langfuse', 'warm-start import', 'in', true],
               ['Slack', 'alerts out', 'out', true], ['Sentry', 'transactions + issues', 'out', true],
+              ['Webhooks', 'signed events out', 'out', true],
             ].map(([name, sub, dir, live]) => (
               <div key={name as string} className="bg-black p-5">
                 <div className="flex items-center justify-between mb-2">

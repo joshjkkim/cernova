@@ -1,8 +1,11 @@
+import secrets
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional
 from db import get_client
 from services.slack_service import send_test_alert
+from services.webhook_service import send_test_webhook
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -31,6 +34,9 @@ class ProjectResponse(BaseModel):
     threshold_tokens: Optional[float] = None
     threshold_cost: Optional[float] = None
     monthly_budget_usd: Optional[float] = None
+    webhook_url: Optional[str] = None
+    webhook_secret: Optional[str] = None
+    webhook_anomaly_level: Optional[str] = 'critical'
 
 
 class WebhookUpdate(BaseModel):
@@ -46,6 +52,8 @@ class WebhookUpdate(BaseModel):
     threshold_tokens: Optional[float] = None
     threshold_cost: Optional[float] = None
     monthly_budget_usd: Optional[float] = None
+    webhook_url: Optional[str] = None
+    webhook_anomaly_level: Optional[str] = None
 
 
 class ProjectWithCallsResponse(ProjectResponse):
@@ -199,6 +207,17 @@ def update_webhook(project_id: str, body: WebhookUpdate) -> ProjectResponse:
         updates["threshold_tokens"] = body.threshold_tokens
         updates["threshold_cost"] = body.threshold_cost
         updates["monthly_budget_usd"] = body.monthly_budget_usd
+
+        # Generic outbound webhook. Persist url + level; mint a signing secret the
+        # first time a URL is set so events are always signed.
+        updates["webhook_url"] = body.webhook_url
+        if body.webhook_anomaly_level is not None:
+            updates["webhook_anomaly_level"] = body.webhook_anomaly_level
+        if body.webhook_url:
+            existing = client.table("PROJECTS").select("webhook_secret").eq("id", project_id).single().execute()
+            if not (existing.data or {}).get("webhook_secret"):
+                updates["webhook_secret"] = secrets.token_hex(32)
+
         res = client.table("PROJECTS").update(updates).eq("id", project_id).execute()
         if not res.data:
             raise HTTPException(status_code=404, detail="Project not found")
@@ -218,6 +237,24 @@ def test_webhook(project_id: str) -> dict:
         if not res.data or not res.data.get("slack_webhook_url"):
             raise HTTPException(status_code=400, detail="No webhook configured")
         ok = send_test_alert(res.data["slack_webhook_url"], res.data["name"])
+        if not ok:
+            raise HTTPException(status_code=502, detail="Webhook delivery failed")
+        return {"ok": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/{project_id}/outbound-webhook/test")
+def test_outbound_webhook(project_id: str) -> dict:
+    """Send a synthetic anomaly event to the project's outbound webhook_url."""
+    try:
+        client = get_client()
+        res = client.table("PROJECTS").select("name,webhook_url,webhook_secret").eq("id", project_id).single().execute()
+        if not res.data or not res.data.get("webhook_url"):
+            raise HTTPException(status_code=400, detail="No outbound webhook configured")
+        ok = send_test_webhook(res.data["webhook_url"], res.data.get("webhook_secret"), res.data["name"])
         if not ok:
             raise HTTPException(status_code=502, detail="Webhook delivery failed")
         return {"ok": True}
