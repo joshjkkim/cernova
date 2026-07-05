@@ -57,7 +57,16 @@ interface Run {
   createdAt: string;
 }
 
-type Tab = 'overview' | 'logs' | 'runs' | 'anomalies' | 'steps' | 'usage' | 'settings';
+type Tab = 'overview' | 'logs' | 'runs' | 'anomalies' | 'steps' | 'contracts' | 'usage' | 'settings';
+
+interface ContractRow {
+  step_profile_id: string;
+  step_name: string | null;
+  status: 'observing' | 'proposed' | 'enforced' | 'rejected';
+  format: string | null;
+  required_keys: string[];
+  sample_count: number | null;
+}
 
 interface MetricTrend {
   metric: string;
@@ -207,6 +216,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [logsQuery, setLogsQuery]         = useState('');
   const [runsQuery, setRunsQuery]         = useState('');
   const [stepHealth, setStepHealth]       = useState<StepHealthRow[]>([]);
+  const [contracts, setContracts]         = useState<ContractRow[]>([]);
 
   const runs = useMemo(() => groupIntoRuns(calls), [calls]);
   const selectedRun = useMemo(() => runs.find((r) => r.runId === selectedRunId) ?? null, [runs, selectedRunId]);
@@ -255,6 +265,12 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
       if (anomaliesRes.ok) setAnomalies(await anomaliesRes.json() as AnomalyRow[]);
       if (registryRes.ok) setConditionRegistry(await registryRes.json() as ConditionRegistry);
       if (healthRes.ok) setStepHealth(await healthRes.json() as StepHealthRow[]);
+
+      // Contracts are API-key authed (same endpoint the SDK/CLI uses).
+      const contractsRes = await fetch(`${BACKEND}/contracts`, {
+        headers: { Authorization: `Bearer ${proj.API_KEY}` },
+      });
+      if (contractsRes.ok) setContracts(((await contractsRes.json()).contracts ?? []) as ContractRow[]);
     }
     init();
   }, [projectId, router]);
@@ -306,6 +322,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   }
 
   const degradingCount = stepHealth.filter(s => s.status !== 'healthy').length;
+  const proposedCount = contracts.filter(c => c.status === 'proposed').length;
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'overview',  label: 'overview' },
@@ -313,6 +330,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     { id: 'runs',      label: `runs${runs.length ? ` (${runs.length})` : ''}` },
     { id: 'anomalies', label: `anomalies${criticalCount ? ` (${criticalCount} critical)` : anomalyRuns.length ? ` (${anomalyRuns.length})` : ''}` },
     { id: 'steps',     label: `steps${degradingCount ? ` (${degradingCount} drifting)` : ''}` },
+    { id: 'contracts', label: `contracts${proposedCount ? ` (${proposedCount} new)` : ''}` },
     { id: 'usage',     label: 'usage' },
     { id: 'settings',  label: 'settings' },
   ];
@@ -445,6 +463,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
         {tab === 'anomalies' && <AnomaliesTab runs={anomalyRuns} registry={conditionRegistry} />}
         {tab === 'steps'     && <StepsHealthTab health={stepHealth} />}
+        {tab === 'contracts' && <ContractsTab contracts={contracts} apiKey={project.API_KEY} onUpdate={(id, status) => setContracts(cs => cs.map(c => c.step_profile_id === id ? { ...c, status } : c))} />}
         {tab === 'usage'     && <UsageTab project={project} />}
         {tab === 'settings'  && <SettingsTab project={project} />}
 
@@ -1276,6 +1295,96 @@ function StepsHealthTab({ health }: { health: StepHealthRow[] }) {
 
 // ── Usage tab ─────────────────────────────────────────────────────────────────
 
+function ContractsTab({ contracts, apiKey, onUpdate }: {
+  contracts: ContractRow[];
+  apiKey: string;
+  onUpdate: (stepProfileId: string, status: ContractRow['status']) => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg]   = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function verdict(stepProfileId: string, v: 'confirm' | 'reject') {
+    setBusy(stepProfileId); setMsg(null);
+    try {
+      const res = await fetch(`${BACKEND}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ subject_type: 'contract', subject_id: stepProfileId, verdict: v }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      onUpdate(stepProfileId, v === 'confirm' ? 'enforced' : 'rejected');
+      setMsg({ ok: true, text: v === 'confirm' ? 'Contract enforced — hard violations now score.' : 'Contract rejected — it won\'t be proposed again.' });
+    } catch (e) {
+      setMsg({ ok: false, text: String(e) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const withContract = contracts.filter(c => c.status !== 'observing');
+  if (withContract.length === 0) {
+    return <EmptyState text="No learned contracts yet — one is induced once a step profile has 20+ successful outputs." />;
+  }
+
+  const order: Record<ContractRow['status'], number> = { proposed: 0, enforced: 1, rejected: 2, observing: 3 };
+  const sorted = [...withContract].sort((a, b) => order[a.status] - order[b.status]);
+
+  const badgeFor = (s: ContractRow['status']) =>
+    s === 'proposed' ? <Badge variant="warning">proposed</Badge>
+    : s === 'enforced' ? <Badge variant="ok">enforced</Badge>
+    : s === 'rejected' ? <Badge variant="error">rejected</Badge>
+    : <Badge variant="neutral">observing</Badge>;
+
+  return (
+    <div>
+      <p className="font-mono text-[11px] text-gray-600 leading-6 mb-5 max-w-2xl">
+        Contracts are learned from each step&apos;s own output history. A <span className="text-yellow-400">proposed</span> contract is checked and logged but does not affect scores until you confirm it — then hard violations fold into the anomaly score. Rejecting one retires it.
+      </p>
+      {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
+      <div className="space-y-px bg-white/8 border border-white/8">
+        {sorted.map((c) => (
+          <div key={c.step_profile_id} className="bg-[#0a0a0a] p-4">
+            <div className="flex items-start justify-between gap-4 mb-3">
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="font-mono text-xs text-white font-bold truncate">{c.step_name ?? 'unnamed step'}</span>
+                  {badgeFor(c.status)}
+                </div>
+                <p className="font-mono text-[10px] text-gray-700">learned from {c.sample_count ?? '—'} outputs · format {c.format ?? 'text'}</p>
+              </div>
+              {c.status === 'proposed' && (
+                <div className="flex gap-2 shrink-0">
+                  <button
+                    onClick={() => verdict(c.step_profile_id, 'confirm')}
+                    disabled={busy === c.step_profile_id}
+                    className="px-3 py-1.5 font-mono text-[11px] border border-green-700/60 text-green-400 hover:bg-green-900/20 hover:border-green-500 disabled:opacity-40 transition-colors"
+                  >
+                    {busy === c.step_profile_id ? '…' : '✓ confirm'}
+                  </button>
+                  <button
+                    onClick={() => verdict(c.step_profile_id, 'reject')}
+                    disabled={busy === c.step_profile_id}
+                    className="px-3 py-1.5 font-mono text-[11px] border border-red-700/60 text-red-400 hover:bg-red-900/20 hover:border-red-500 disabled:opacity-40 transition-colors"
+                  >
+                    ✕ reject
+                  </button>
+                </div>
+              )}
+            </div>
+            {c.required_keys.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {c.required_keys.map((k) => (
+                  <span key={k} className="font-mono text-[10px] text-violet-300 bg-violet-900/30 px-1.5 py-0.5">{k}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function UsageTab({ project }: { project: Project }) {
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
   const [data, setData] = useState<{
@@ -1407,6 +1516,62 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 const inputCls = 'bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20 w-full';
 
+function ImportSection({ project }: { project: Project }) {
+  const [publicKey, setPublicKey] = useState('');
+  const [secretKey, setSecretKey] = useState('');
+  const [host, setHost]           = useState('https://cloud.langfuse.com');
+  const [importing, setImporting] = useState(false);
+  const [msg, setMsg]             = useState<{ ok: boolean; text: string } | null>(null);
+
+  async function runImport() {
+    setImporting(true); setMsg(null);
+    try {
+      const res = await fetch(`${BACKEND}/import/langfuse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${project.API_KEY}` },
+        body: JSON.stringify({ public_key: publicKey.trim(), secret_key: secretKey.trim(), host: host.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().then(d => d.detail).catch(() => null);
+        throw new Error(detail || `HTTP ${res.status}`);
+      }
+      setMsg({ ok: true, text: 'Import started — baselines warm in the background. Check the steps tab shortly.' });
+      setPublicKey(''); setSecretKey('');
+    } catch (e) {
+      setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <SettingSection
+      title="Warm-start import"
+      description="Import your Langfuse generation history to build per-step baselines from real traffic instead of waiting for live calls. Backdated, deduplicated, and alert-suppressed — re-running is safe."
+    >
+      <div className="space-y-4">
+        <Field label="Langfuse public key">
+          <input type="text" value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk-lf-…" className={inputCls} />
+        </Field>
+        <Field label="Langfuse secret key">
+          <input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder="sk-lf-…" className={inputCls} />
+        </Field>
+        <Field label="Host">
+          <input type="url" value={host} onChange={e => setHost(e.target.value)} placeholder="https://cloud.langfuse.com" className={inputCls} />
+        </Field>
+        {msg && <p className={['font-mono text-xs', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
+        <button
+          onClick={runImport}
+          disabled={importing || !publicKey.trim() || !secretKey.trim()}
+          className="font-mono text-xs font-bold px-5 py-2.5 border border-violet-700/60 text-violet-400 hover:bg-violet-900/20 hover:border-violet-500 disabled:opacity-40 transition-colors"
+        >
+          {importing ? 'starting…' : 'import from langfuse'}
+        </button>
+      </div>
+    </SettingSection>
+  );
+}
+
 function SettingsTab({ project }: { project: Project }) {
   const [url, setUrl]             = useState(project.slack_webhook_url ?? '');
   const [alertOnError, setAlertOnError] = useState(project.alert_on_error ?? true);
@@ -1482,6 +1647,8 @@ function SettingsTab({ project }: { project: Project }) {
 
   return (
     <div className="max-w-xl space-y-0">
+
+      <ImportSection project={project} />
 
       <SettingSection
         title="Slack alerts"

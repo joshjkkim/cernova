@@ -524,11 +524,11 @@ function SectionDetection() {
         { key: 'confirm / reject', label: 'anomaly', color: 'text-violet-400', value: 'Marks an anomaly real or a false alarm. Captured as a label for tuning.' },
       ]} />
       <Code lang="bash">{`# List a project's contracts — see what's proposed and worth confirming
-curl https://cernova.dev/contracts \\
+curl https://api.cernova.dev/contracts \\
   -H "Authorization: Bearer <CERNOVA_API_KEY>"
 
 # Confirm a contract — promotes proposed -> enforced
-curl -X POST https://cernova.dev/feedback \\
+curl -X POST https://api.cernova.dev/feedback \\
   -H "Authorization: Bearer <CERNOVA_API_KEY>" \\
   -H "Content-Type: application/json" \\
   -d '{"subject_type":"contract","subject_id":"<step_profile_id>","verdict":"confirm"}'`}</Code>
@@ -604,7 +604,7 @@ function SectionIntegrations() {
       <H2>OpenTelemetry</H2>
       <P>Already emitting OpenTelemetry GenAI spans — via <a href="https://github.com/traceloop/openllmetry" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">OpenLLMetry</a>, Traceloop, or native instrumentation? Point your OTLP exporter at Cernova and every LLM span flows into the same detection pipeline — no SDK, no code change. Cernova reads the <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/" className="text-violet-400 hover:text-violet-300 underline underline-offset-4" target="_blank" rel="noreferrer">GenAI semantic conventions</a> and ignores non-LLM spans.</P>
       <Code lang="bash">{`# Point any OTLP exporter at Cernova
-OTEL_EXPORTER_OTLP_ENDPOINT=https://cernova.dev
+OTEL_EXPORTER_OTLP_ENDPOINT=https://api.cernova.dev
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
       <P>Traces post to <code className="text-violet-400 font-mono">/v1/traces</code> (OTLP/HTTP, JSON or protobuf). The span&apos;s <code className="text-violet-400 font-mono">trace_id</code> becomes the Cernova run, each GenAI span becomes a step, and per-step fingerprinting and anomaly detection run exactly as they do for SDK ingests.</P>
       <Callout type="info">
@@ -622,7 +622,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
 
       <H2>Langfuse import</H2>
       <P>Already running on Langfuse? Import your generation history to warm per-step baselines in minutes instead of waiting for live traffic. Cernova pulls your <code className="text-violet-400 font-mono">GENERATION</code> observations, backdates them to their original timestamps, and replays them through the same pipeline — building step profiles and baselines with alerts suppressed, so backfilling months of traffic fires no stale notifications.</P>
-      <Code lang="bash">{`curl -X POST https://cernova.dev/import/langfuse \\
+      <Code lang="bash">{`curl -X POST https://api.cernova.dev/import/langfuse \\
   -H "Authorization: Bearer <CERNOVA_API_KEY>" \\
   -H "Content-Type: application/json" \\
   -d '{
