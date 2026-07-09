@@ -106,7 +106,7 @@ Your app
        ├─ calls the LLM normally → response returned unchanged
        └─ fire-and-forget POST /ingest → FastAPI backend
                                            ├─ fingerprinter (step identity)
-                                           ├─ anomaly detector (5 layers)
+                                           ├─ anomaly detector (4 layers)
                                            └─ Supabase INSERT
                                                    └─ Realtime → dashboard
 ```
@@ -117,17 +117,16 @@ Every LLM call is intercepted, wall-clock latency is measured, tokens and cost a
 
 ## Anomaly detection
 
-Each ingest runs through 5 detection layers:
+Each ingest runs through 4 detection layers:
 
 | Layer | What it checks |
 |---|---|
-| L1 Hard | Status failures, token accounting errors |
-| L2 Format | Malformed JSON output |
-| L3 Shape | Output length vs. expected (truncation, wrong format) |
-| L4 Behavioral | Latency stalls, near-empty outputs |
-| L5 Statistical | Per-step IQR fence on latency, tokens, cost |
+| Hard failures | Status failures, errors, token-accounting mismatches |
+| Output format | Prompt-implied contracts: JSON / enum / yes-no violations |
+| Numeric thresholds | Latency / token / cost limits + cross-field plausibility |
+| Statistical baseline | Per-step IQR fence (log space) on latency, tokens, cost |
 
-L5 uses a **Tukey fence in log space** — multiplicative detection that handles LLM data's right-skewed distribution correctly. Baselines are scoped per **step profile** (semantic fingerprint of the system prompt), not per project.
+The statistical layer uses a **Tukey fence in log space** — multiplicative detection that handles LLM data's right-skewed distribution correctly. Baselines are scoped per **step profile** (semantic fingerprint of the system prompt), not per project.
 
 ---
 

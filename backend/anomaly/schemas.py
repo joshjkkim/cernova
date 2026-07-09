@@ -12,7 +12,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 # Where a condition lives. Stable strings — also used in EvalResult.stopped_at_layer.
-LayerId = Literal["L1_hard", "L2_format", "L4_integers", "L5_statistical"]
+# Names are semantic, not positional: adding or removing a layer never renumbers the rest.
+LayerId = Literal["hard_failures", "output_format", "numeric_thresholds", "statistical_baseline"]
 
 # Coarse shape classification — used by L4 cross-field checks and EvalResult UI fields.
 OutputShape = Literal[

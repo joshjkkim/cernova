@@ -1,4 +1,4 @@
-"""Layer 4 — integers (static thresholds + cross-field plausibility).
+"""Numeric-thresholds layer (static limits + cross-field plausibility).
 
 Numeric sanity checks: raw limits (latency / tokens / cost / ratio) from
 EvalConfig.limits, plus cross-field rules that combine a step's expected shape
@@ -20,8 +20,8 @@ from ..schemas import CallInput, EvalHit
 from ..shape_classifier import infer_expected_shape
 
 
-def run_layer_4_integers(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
-    """Run all L4 numeric / cross-field checks. Returns fired hits (possibly empty)."""
+def run_numeric_thresholds(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
+    """Run all numeric / cross-field checks. Returns fired hits (possibly empty)."""
 
     hits: list[EvalHit] = []
 

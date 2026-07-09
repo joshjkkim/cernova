@@ -1,4 +1,4 @@
-"""Layer 5 — IQR/log-normal deviation from per-step-profile baseline.
+"""Statistical-baseline layer — IQR/log-normal deviation from per-step-profile baseline.
 
 Replaces the earlier z-score approach. LLM latency, cost, and token counts are
 right-skewed (log-normal in practice), so z-scores against mean/std are badly
@@ -20,7 +20,7 @@ Fires when a baseline exists and deviation > 0:
   5003  cost
   5004  output_tokens
 
-No baseline → no hits. L4's 4001/4002/4003 serve as the cold-start fallback.
+No baseline → no hits. The numeric-thresholds layer's 4001/4002/4003 serve as the cold-start fallback.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from ..config import EvalConfig
 from ..schemas import CallInput, EvalHit, MetricStat
 
 
-def run_layer_5_statistical(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
+def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
     baseline = config.baseline
     if baseline is None:
         return []

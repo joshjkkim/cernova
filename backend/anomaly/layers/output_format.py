@@ -1,4 +1,4 @@
-"""Layer 2 — format / contract violations (the "regex" layer).
+"""Output-format / contract violations layer (regex-based).
 
 The prompt often declares the shape of the answer it wants ("respond in JSON",
 "answer with one of: a, b, c", "yes/no question"). This layer infers that
@@ -50,8 +50,8 @@ def _enum_options(prompt: str) -> set[str]:
     return options if len(options) >= 2 else set()
 
 
-def run_layer_2_regex(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
-    """Run all L2 contract checks. Returns fired hits (possibly empty)."""
+def run_output_format(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
+    """Run all output-format contract checks. Returns fired hits (possibly empty)."""
 
     hits: list[EvalHit] = []
 

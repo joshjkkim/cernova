@@ -1,6 +1,7 @@
 """evaluate_call — run the weighted layers in order and produce an EvalResult.
 
-Layers run L1 -> L2 -> L4 -> L5. Each fired condition contributes its penalty to
+Layers run hard_failures -> output_format -> numeric_thresholds ->
+statistical_baseline. Each fired condition contributes its penalty to
 a running total via error_map. After each layer we check the threshold: once
 total_score >= threshold the call is anomalous and we short-circuit, recording
 which layer we stopped at.
@@ -14,20 +15,21 @@ flag the call.
 from __future__ import annotations
 
 from .config import EvalConfig
-from .layers.layer_1_hard import run_layer_1_hard
-from .layers.layer_2_regex import run_layer_2_regex
-from .layers.layer_4_integers import run_layer_4_integers
-from .layers.layer_5_statistical import run_layer_5_statistical
+from .layers.hard_failures import run_hard_failures
+from .layers.output_format import run_output_format
+from .layers.numeric_thresholds import run_numeric_thresholds
+from .layers.statistical_baseline import run_statistical_baseline
 from .schemas import CallInput, EvalHit, EvalResult, LayerId
 from .shape_classifier import classify_shape
 
-# Ordered pipeline. (layer_id, runner) — order is the scoring order.
-# L3 was removed — heuristic shape checks overlapped with L2 and added noise.
+# Ordered pipeline. (layer_id, runner) — order is the scoring order. Labels are
+# semantic, not positional, so add/remove never leaves a misleading gap (an
+# earlier heuristic shape layer was removed for overlapping with output_format).
 _LAYERS: list[tuple[LayerId, object]] = [
-    ("L1_hard",        run_layer_1_hard),
-    ("L2_format",      run_layer_2_regex),
-    ("L4_integers",    run_layer_4_integers),
-    ("L5_statistical", run_layer_5_statistical),
+    ("hard_failures",        run_hard_failures),
+    ("output_format",        run_output_format),
+    ("numeric_thresholds",   run_numeric_thresholds),
+    ("statistical_baseline", run_statistical_baseline),
 ]
 
 

@@ -1,10 +1,10 @@
-"""Tests for Layer 1 (hard failures).
+"""Tests for the hard-failures layer.
 
 Each test documents one PASS (clean, no hits) or FAIL (a specific hard code
 fires) scenario. Runnable two ways:
 
-    cd backend && pytest anomaly/tests/test_layer_1_hard.py
-    cd backend && .venv/bin/python anomaly/tests/test_layer_1_hard.py   # no pytest needed
+    cd backend && pytest anomaly/tests/test_hard_failures.py
+    cd backend && .venv/bin/python anomaly/tests/test_hard_failures.py   # no pytest needed
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from anomaly.config import EvalConfig
-from anomaly.layers.layer_1_hard import run_layer_1_hard
+from anomaly.layers.hard_failures import run_hard_failures
 from anomaly.schemas import CallInput
 
 CFG = EvalConfig()
@@ -46,7 +46,7 @@ def _base(**overrides) -> CallInput:
 
 
 def _codes(payload: CallInput) -> set[int]:
-    return {h.condition_code for h in run_layer_1_hard(payload, CFG)}
+    return {h.condition_code for h in run_hard_failures(payload, CFG)}
 
 
 # --- PASS: clean calls produce zero hits ---------------------------------

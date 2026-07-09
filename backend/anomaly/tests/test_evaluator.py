@@ -1,14 +1,15 @@
 """End-to-end tests for evaluate_call — one scenario per active layer.
 
-The engine scores layers cumulatively (L1 -> L2 -> L4 -> L5) and only triggers
-once total_score crosses the threshold. An L1 hard failure is heavy enough to
-trigger on its own (and short-circuits); a single L2 or L4 breach is detected as
-a sub-threshold warning. (L3 heuristic shape checks were removed from the
-pipeline — see evaluator.py.)
+The engine scores layers cumulatively (hard_failures -> output_format ->
+numeric_thresholds -> statistical_baseline) and only triggers once total_score
+crosses the threshold. A hard failure is heavy enough to trigger on its own (and
+short-circuits); a single output_format or numeric_thresholds breach is detected
+as a sub-threshold warning. (An earlier heuristic shape layer was removed from
+the pipeline — see evaluator.py.)
 
-    L1 — hard failure        (status_success=False)       -> triggers, stops at L1_hard
-    L2 — JSON contract        (asks JSON, returns prose)    -> 2001 detected, sub-threshold
-    L4 — numeric thresholds   (latency/tokens/cost/ratio)   -> 4001-4004 detected, sub-threshold
+    hard_failures       (status_success=False)       -> triggers, stops at hard_failures
+    output_format        (asks JSON, returns prose)   -> 2001 detected, sub-threshold
+    numeric_thresholds   (latency/tokens/cost/ratio)  -> 4001-4004 detected, sub-threshold
 
 Runnable two ways:
 
@@ -77,7 +78,8 @@ def l2_call() -> CallInput:
 def l4_call() -> CallInput:
     """Numeric thresholds: a draft step that blew past latency, token, cost and
     ratio limits — fires 4001 + 4002 + 4003 + 4004. No contract/shape wording,
-    so L1/L2/L3 stay silent and the run reaches L4. The body length is chosen so
+    so hard_failures/output_format stay silent and the run reaches
+    numeric_thresholds. The body length is chosen so
     chars-per-token stays plausible (no 4009 noise)."""
     body = "word " * 40_000  # 200_000 chars / 80_000 tokens = 2.5 chars/token
     return CallInput(
@@ -104,7 +106,7 @@ def test_clean_call_is_clean():
 def test_l1_stops_at_hard():
     r = evaluate_call(l1_call(), CFG)
     assert r.triggered
-    assert r.stopped_at_layer == "L1_hard"
+    assert r.stopped_at_layer == "hard_failures"
     assert 1001 in r.error_map
     assert r.total_score >= r.threshold
 
@@ -116,8 +118,8 @@ def test_l2_format_detected():
     assert 2001 in r.error_map
     assert not r.triggered
     assert r.hits[0].step_name == "extract-fields"
-    # Only L2 fired (L1 stayed silent).
-    assert all(h.layer == "L2_format" for h in r.hits)
+    # Only output_format fired (hard_failures stayed silent).
+    assert all(h.layer == "output_format" for h in r.hits)
 
 
 def test_l4_integers_detected():
@@ -126,8 +128,8 @@ def test_l4_integers_detected():
     r = evaluate_call(l4_call(), CFG)
     assert {4001, 4002, 4003, 4004} <= set(r.error_map)
     assert not r.triggered
-    # Only L4 fired (L1 + L2 stayed silent).
-    assert all(h.layer == "L4_integers" for h in r.hits)
+    # Only numeric_thresholds fired (hard_failures + output_format stayed silent).
+    assert all(h.layer == "numeric_thresholds" for h in r.hits)
 
 
 # --- minimal runner so this works without pytest + prints the outputs -----

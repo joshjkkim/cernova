@@ -1,9 +1,9 @@
-"""Layer 1 — hard failures.
+"""Hard-failures layer.
 
 Deterministic, non-heuristic checks. These are facts about the trace that are
 unambiguously wrong (the call failed, carries an error, has impossible numbers,
 or is missing required identity fields). No shape/contract guessing happens
-here — that is L2/L3/L4.
+here — that is the output_format, numeric_thresholds, and statistical_baseline layers.
 
 Each branch references a condition code from condition_registry (1001-1008) and
 appends an EvalHit. The evaluator is responsible for turning hits into the
@@ -22,8 +22,8 @@ def _is_blank(value: str | None) -> bool:
     return value is None or value.strip() == ""
 
 
-def run_layer_1_hard(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
-    """Run all L1 hard checks against one call. Returns the fired hits (possibly
+def run_hard_failures(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
+    """Run all hard-failure checks against one call. Returns the fired hits (possibly
     empty). Order is stable so output is deterministic."""
 
     hits: list[EvalHit] = []
