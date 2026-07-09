@@ -163,7 +163,7 @@ const PILLARS = [
   { k: 'Detect', accent: 'text-red-400', bar: 'border-red-500', head: 'Catch what your logs call success.', body: 'A 4-layer engine scores every call — hard failures, format breaks, numeric limits, and statistical drift against each step’s own history. Silent regressions surface loud.', visual: <ScoreMini /> },
   { k: 'Learn', accent: 'text-violet-400', bar: 'border-violet-500', head: 'Contracts it writes itself.', body: 'Cernova induces each step’s output contract from its real history — required keys, JSON shape, enum domains. No schema to hand-write; it learns what “normal output” means.', visual: <ContractMini /> },
   { k: 'Confirm', accent: 'text-green-400', bar: 'border-green-500', head: 'One tap tightens detection.', body: 'Confirm a real anomaly or flag a false alarm. Every verdict tunes your project — proprietary labels only your production traffic can produce, feeding the model that watches it.', visual: <ConfirmMini /> },
-  { k: 'Warm-start', accent: 'text-blue-400', bar: 'border-blue-500', head: 'Signal on day one.', body: 'Import your Langfuse history and baselines build from real traffic in minutes — no waiting to accrue calls. Backdated, deduped, silent. You see anomalies immediately.', visual: <BaselineMini /> },
+  { k: 'Warm-start', accent: 'text-blue-400', bar: 'border-blue-500', head: 'Signal on day one.', body: 'Import your Langfuse or LangSmith history and baselines build from real traffic in minutes — no waiting to accrue calls. Backdated, deduped, silent. You see anomalies immediately.', visual: <BaselineMini /> },
 ]
 
 function Pillars() {
@@ -455,6 +455,7 @@ export default function LandingPage() {
               ['Anthropic SDK', 'traces in', 'in', true], ['OpenAI SDK', 'traces in', 'in', true],
               ['LangChain', 'python · any provider', 'in', true], ['OpenTelemetry', 'genai ingest', 'in', true],
               ['Vercel AI SDK', 'telemetry ingest', 'in', true], ['Langfuse', 'warm-start import', 'in', true],
+              ['LangSmith', 'warm-start import', 'in', true],
               ['Slack', 'alerts out', 'out', true], ['Sentry', 'transactions + issues', 'out', true],
               ['Webhooks', 'signed events out', 'out', true],
             ].map(([name, sub, dir, live]) => (
@@ -476,7 +477,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-3">Setup</p>
           <h2 className="font-sans font-black text-4xl sm:text-5xl text-white mb-4">Three steps.<br />Under five minutes.</h2>
-          <p className="font-mono text-xs text-gray-600 mb-14">Or skip the wait — <span className="text-violet-400">import your Langfuse history</span> and start with warm baselines.</p>
+          <p className="font-mono text-xs text-gray-600 mb-14">Or skip the wait — <span className="text-violet-400">import your Langfuse or LangSmith history</span> and start with warm baselines.</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               { n: '01', title: 'Install', code: 'npm install @cernova/sdk' },

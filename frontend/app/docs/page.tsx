@@ -664,11 +664,24 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
         Imported calls are tagged <code className="text-gray-300">source=langfuse</code> and deduplicated on their Langfuse observation id, so you can re-run the import any time without creating duplicates.
       </Callout>
 
+      <H2>LangSmith import</H2>
+      <P>Already on LangSmith? Same warm-start, different source. Cernova queries your <code className="text-violet-400 font-mono">llm</code> runs, backdates them to their original timestamps, and replays them through the pipeline with alerts suppressed — so months of history seed per-step baselines without firing stale notifications.</P>
+      <Code lang="bash">{`curl -X POST https://api.cernova.dev/import/langsmith \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "api_key": "lsv2_...",
+    "host": "https://api.smith.langchain.com"
+  }'`}</Code>
+      <P>Add <code className="text-violet-400 font-mono">"session_ids": ["..."]</code> to scope the import to specific LangSmith projects; omit it to pull every project the key can see. As with Langfuse, credentials are validated immediately — bad keys return <code className="text-violet-400 font-mono">400</code> — then the import runs in the background.</P>
+      <Callout type="info">
+        Imported calls are tagged <code className="text-gray-300">source=langsmith</code> and deduplicated on their LangSmith run id, so re-running the import never creates duplicates.
+      </Callout>
+
       <H2>On the roadmap</H2>
       <P>Planned integrations, in rough priority order:</P>
       <Rows items={[
-        { key: 'LangSmith import', label: 'traces in', color: 'text-gray-400', value: 'The same warm-start import for LangSmith run history — one adapter away.' },
-        { key: 'Read API',         label: 'data out',  color: 'text-gray-400', value: 'Pull traces, anomalies, and contracts programmatically with your project API key.' },
+        { key: 'Read API', label: 'data out', color: 'text-gray-400', value: 'Pull traces, anomalies, and contracts programmatically with your project API key.' },
       ]} />
     </div>
   );

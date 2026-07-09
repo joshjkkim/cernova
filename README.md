@@ -91,8 +91,10 @@ Traces in from what you already run, alerts out to where you already look.
 | Vercel AI SDK telemetry (via OTLP) | traces in | ✅ live |
 | Slack | alerts out | ✅ live |
 | Sentry (performance transactions + anomaly issues) | alerts out | ✅ live |
-| Langfuse / LangSmith import (warm-start baselines from existing traces) | traces in | 🔜 planned |
-| Generic webhooks / PagerDuty | alerts out | 🔜 planned |
+| Langfuse import (warm-start baselines from existing traces) | traces in | ✅ live |
+| LangSmith import (warm-start baselines from existing traces) | traces in | ✅ live |
+| Generic outbound webhooks (signed events) | alerts out | ✅ live |
+| Read API (pull traces / anomalies / contracts) | data out | 🔜 planned |
 
 ---
 

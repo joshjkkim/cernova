@@ -8,7 +8,7 @@ pipeline entry (process_canonical) are patched, so these verify the import logic
 import pytest
 
 import services.importer as imp
-from services.importer import ImportError_, import_langfuse
+from services.importer import ImportError_, import_langfuse, import_langsmith
 
 
 def _gen(obs_id, start, **kw):
@@ -95,3 +95,78 @@ def test_auth_failure_propagates(monkeypatch, processed):
     monkeypatch.setattr(imp, "_fetch_page", boom)
     with pytest.raises(ImportError_):
         import_langfuse({"id": "p"}, "pk", "sk")
+
+
+# --- LangSmith -------------------------------------------------------------
+
+def _run(run_id, start, **kw):
+    r = {
+        "id": run_id, "trace_id": "t", "parent_run_id": None, "run_type": "llm",
+        "name": "step", "start_time": start, "end_time": start,
+        "inputs": {"prompts": ["hi"]}, "outputs": {"generations": [[{"text": "ok"}]]},
+        "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2,
+        "extra": {"metadata": {"ls_model_name": "claude-haiku-4-5"}},
+    }
+    r.update(kw)
+    return r
+
+
+@pytest.fixture
+def ls_processed(monkeypatch):
+    """Capture traces handed to process_canonical; default: no prior imports."""
+    seen = []
+    monkeypatch.setattr(
+        "routers.ingest.process_canonical",
+        lambda trace, project, suppress_alerts=False, synchronous=False: seen.append(trace) or "row",
+    )
+    monkeypatch.setattr(imp, "_existing_external_ids", lambda pid, source=None: set())
+    return seen
+
+
+def _pages(*pages):
+    """Return a _langsmith_query stub that walks cursor→cursor across pages."""
+    calls = {"n": 0}
+
+    def query(host, api_key, body):
+        i = calls["n"]
+        calls["n"] += 1
+        return pages[i] if i < len(pages) else {"runs": []}
+    return query
+
+
+def test_ls_imports_in_chronological_order(monkeypatch, ls_processed):
+    monkeypatch.setattr(imp, "_langsmith_query", _pages(
+        {"runs": [_run("b", "2026-01-02T00:00:00"), _run("a", "2026-01-01T00:00:00")],
+         "cursors": {"next": None}},
+    ))
+    result = import_langsmith({"id": "p"}, "key")
+    assert result.imported == 2
+    assert [t.external_id for t in ls_processed] == ["a", "b"]
+
+
+def test_ls_paginates_via_cursor(monkeypatch, ls_processed):
+    monkeypatch.setattr(imp, "_langsmith_query", _pages(
+        {"runs": [_run("a", "2026-01-01T00:00:00")], "cursors": {"next": "c2"}},
+        {"runs": [_run("b", "2026-01-02T00:00:00")], "cursors": {"next": None}},
+    ))
+    result = import_langsmith({"id": "p"}, "key")
+    assert result.fetched == 2 and result.imported == 2
+
+
+def test_ls_dedup_skips_already_imported(monkeypatch, ls_processed):
+    monkeypatch.setattr(imp, "_existing_external_ids", lambda pid, source=None: {"a"})
+    monkeypatch.setattr(imp, "_langsmith_query", _pages(
+        {"runs": [_run("a", "2026-01-01T00:00:00"), _run("b", "2026-01-02T00:00:00")],
+         "cursors": {"next": None}},
+    ))
+    result = import_langsmith({"id": "p"}, "key")
+    assert result.skipped == 1 and result.imported == 1
+    assert [t.external_id for t in ls_processed] == ["b"]
+
+
+def test_ls_auth_failure_propagates(monkeypatch, ls_processed):
+    def boom(host, api_key, body):
+        raise ImportError_("LangSmith rejected the API key (401/403)")
+    monkeypatch.setattr(imp, "_langsmith_query", boom)
+    with pytest.raises(ImportError_):
+        import_langsmith({"id": "p"}, "key")
