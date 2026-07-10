@@ -440,17 +440,16 @@ function SectionDetection() {
   return (
     <div>
       <H2>How it works</H2>
-      <P>Every ingested call is scored by a 4-layer engine running in the background. No configuration required. Scores accumulate — a single L1 hit (100 pts) is immediately critical. L2–L4 conditions score 10–60 pts each and require several to fire before crossing threshold. The engine short-circuits once score ≥ 100 pts.</P>
+      <P>Every ingested call is scored by a 4-layer engine running in the background. No configuration required. Scores accumulate — a single hard-failure hit (100 pts) is immediately critical. The format, numeric, and statistical layers score 10–60 pts each and require several to fire before crossing threshold. The engine short-circuits once score ≥ 100 pts.</P>
 
       <div className="border border-neutral-800 divide-y divide-neutral-800 mb-8">
         {[
-          { layer: 'L1', accent: 'border-red-600',    label: 'text-red-400',    title: 'Hard failures',        desc: 'Deterministic, non-heuristic. status_success=false, error present, token accounting mismatch (total ≠ input+output), negative counts. Any single hit → 100pts → immediate trigger.' },
-          { layer: 'L2', accent: 'border-orange-600', label: 'text-orange-400', title: 'Format violations',    desc: 'Prompt-implied output contracts. Prompt asks for JSON but output isn\'t valid JSON. Yes/no prompt but output is prose. Enum step returned a non-enumerated value.' },
-          { layer: 'L4', accent: 'border-blue-600',   label: 'text-blue-400',   title: 'Numeric thresholds',   desc: 'Static and adaptive p95 limits for latency, tokens, cost. Stall detection (high latency, near-zero output). Cross-field plausibility checks. Defers 4001/4002/4003 to L5 when baseline is active.' },
-          { layer: 'L5', accent: 'border-violet-600', label: 'text-violet-400', title: 'Statistical baseline', desc: 'IQR/log-normal detection against each step\'s own call history. Tukey fence computed in log space — multiplicative detection (is this 5× the 75th percentile?) rather than additive. Activates after 20 clean calls. Owns latency/tokens/cost scoring when active.' },
+          { accent: 'border-red-600',    title: 'Hard failures',        desc: 'Deterministic, non-heuristic. status_success=false, error present, token accounting mismatch (total ≠ input+output), negative counts. Any single hit → 100pts → immediate trigger.' },
+          { accent: 'border-orange-600', title: 'Format violations',    desc: 'Prompt-implied output contracts. Prompt asks for JSON but output isn\'t valid JSON. Yes/no prompt but output is prose. Enum step returned a non-enumerated value.' },
+          { accent: 'border-blue-600',   title: 'Numeric thresholds',   desc: 'Static and adaptive p95 limits for latency, tokens, cost. Stall detection (high latency, near-zero output). Cross-field plausibility checks. Defers 4001/4002/4003 to the statistical layer when a baseline is active.' },
+          { accent: 'border-violet-600', title: 'Statistical baseline', desc: 'IQR/log-normal detection against each step\'s own call history. Tukey fence computed in log space — multiplicative detection (is this 5× the 75th percentile?) rather than additive. Activates after 20 clean calls. Owns latency/tokens/cost scoring when active.' },
         ].map((l) => (
-          <div key={l.layer} className={`flex gap-4 px-4 py-4 border-l-2 ${l.accent} hover:bg-neutral-900 transition-colors`}>
-            <span className={`font-mono text-xs font-bold shrink-0 w-6 mt-0.5 ${l.label}`}>{l.layer}</span>
+          <div key={l.title} className={`flex gap-4 px-4 py-4 border-l-2 ${l.accent} hover:bg-neutral-900 transition-colors`}>
             <div>
               <div className="font-sans font-bold text-sm text-white mb-1">{l.title}</div>
               <p className="font-mono text-[11px] text-gray-600 leading-5">{l.desc}</p>
@@ -470,14 +469,14 @@ function SectionDetection() {
         Fingerprinting runs asynchronously — it never adds latency to your application. The step_profile_id is backfilled on the CALLS row within a few seconds of ingest.
       </Callout>
 
-      <H2>L5 — statistical detection</H2>
+      <H2>Statistical baseline detection</H2>
       <P>Once a step has 20+ calls, Cernova builds a per-step baseline using IQR statistics in log space. Every metric (latency, tokens, cost) is treated as log-normal — the right model for LLM data, which is always positive and right-skewed. Detection uses the Tukey fence:</P>
       <div className="border border-neutral-800 bg-black px-5 py-4 mb-5 font-mono text-sm text-gray-300 leading-7">
         <div>upper fence = log(Q3) + k × log-IQR</div>
         <div>lower fence = log(Q1) − k × log-IQR</div>
         <div className="mt-2 text-gray-600 text-xs">k = 2.5 (default) · Q1/Q3 = 25th/75th percentile in log space</div>
       </div>
-      <P>A call fires L5 when log(observed) falls outside the fence. The reported score is how many IQR-widths beyond the fence the value sits — e.g. <code className="text-violet-400 font-mono">+3.2×IQR</code> means the log-value is 3.2 fence-widths above the upper fence. This is multiplicative detection: &quot;is this call 5× more expensive than the 75th percentile?&quot; rather than additive &quot;is this call $0.50 above the mean?&quot;</P>
+      <P>A call fires the statistical layer when log(observed) falls outside the fence. The reported score is how many IQR-widths beyond the fence the value sits — e.g. <code className="text-violet-400 font-mono">+3.2×IQR</code> means the log-value is 3.2 fence-widths above the upper fence. This is multiplicative detection: &quot;is this call 5× more expensive than the 75th percentile?&quot; rather than additive &quot;is this call $0.50 above the mean?&quot;</P>
       <Rows items={[
         { key: '5001', label: 'latency_iqr_fence',       color: 'text-violet-400', value: 'Call latency falls outside the Tukey fence in log space (multiplicative latency spike).' },
         { key: '5002', label: 'tokens_iqr_fence',        color: 'text-violet-400', value: 'Total token count falls outside the fence — abnormally large or small output for this step.' },
@@ -487,20 +486,20 @@ function SectionDetection() {
       <Callout type="tip">
         <strong className="text-gray-300">Why IQR/log-normal over z-score?</strong> Z-scores assume normal distribution and are sensitive to outliers — a single past latency spike inflates std, making the detector blind to future spikes. IQR uses the middle 50% of data (Q1–Q3) so outliers don&apos;t shift the fence. Log-space means the test is multiplicative, which matches how LLM anomalies actually manifest.
       </Callout>
-      <P>Below 20 calls per step, L5 is inactive and L4&apos;s static thresholds serve as fallback. The baseline also excludes: calls using a different model, calls before the last prompt evolution timestamp, and calls that themselves triggered anomalies.</P>
+      <P>Below 20 calls per step, the statistical layer is inactive and the numeric thresholds serve as fallback. The baseline also excludes: calls using a different model, calls before the last prompt evolution timestamp, and calls that themselves triggered anomalies.</P>
 
       <H2>Trend detection</H2>
-      <P>The Steps tab compares each step&apos;s recent window (last 10 calls) against its baseline window (calls 11–60) to detect gradual degradation that per-call scoring misses. Uses the same IQR/log-normal model as L5 — the recent window mean is checked against the baseline Tukey fence. The reported deviation (<code className="text-violet-400 font-mono">+1.4×IQR</code>) is how many IQR-widths outside the fence the recent average sits.</P>
+      <P>The Steps tab compares each step&apos;s recent window (last 10 calls) against its baseline window (calls 11–60) to detect gradual degradation that per-call scoring misses. Uses the same IQR/log-normal model as the statistical layer — the recent window mean is checked against the baseline Tukey fence. The reported deviation (<code className="text-violet-400 font-mono">+1.4×IQR</code>) is how many IQR-widths outside the fence the recent average sits.</P>
       <Rows items={[
         { key: 'healthy',   color: 'text-green-500',  value: 'Recent mean is within the baseline IQR box (Q1–Q3). No drift.' },
         { key: 'degrading', color: 'text-yellow-500', value: 'Recent mean has drifted outside the IQR box but within the Tukey fence. Early warning.' },
-        { key: 'critical',  color: 'text-red-500',    value: 'Recent mean is outside the Tukey fence (k=2.5). Significant regression — the average of the last 10 calls is anomalous by L5 standards.' },
+        { key: 'critical',  color: 'text-red-500',    value: 'Recent mean is outside the Tukey fence (k=2.5). Significant regression — the average of the last 10 calls is anomalous by the statistical layer\'s standards.' },
         { key: 'warming',   color: 'text-gray-600',   value: 'Not enough call history yet. Shows progress toward the 20-call activation threshold.' },
       ]} />
       <P>Trend detection requires at least 30 calls per step (20 baseline + 10 recent). It catches slow latency creep, cost drift, and throughput degradation that individual call scores would miss.</P>
 
       <H2>Learned output contracts</H2>
-      <P>Beyond the prompt-implied checks in L2, Cernova induces each step&apos;s output contract from its <strong className="text-gray-300">own history</strong> — no schema to hand-write. After 20+ successful outputs it learns the shape: which keys are always present, whether the output is reliably JSON, and small enum domains. New calls are checked against that contract, and structural breaks fold into the anomaly score as L2 codes.</P>
+      <P>Beyond the prompt-implied checks in the output-format layer, Cernova induces each step&apos;s output contract from its <strong className="text-gray-300">own history</strong> — no schema to hand-write. After 20+ successful outputs it learns the shape: which keys are always present, whether the output is reliably JSON, and small enum domains. New calls are checked against that contract, and structural breaks fold into the anomaly score as output-format codes.</P>
       <Rows items={[
         { key: '2010', label: 'format_not_json',      color: 'text-orange-400', value: 'The contract expects JSON but the output no longer parses.' },
         { key: '2011', label: 'missing_required_key', color: 'text-orange-400', value: 'A key present in effectively every historical output is missing.' },
@@ -637,7 +636,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=https://api.cernova.dev
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
       <P>Traces post to <code className="text-violet-400 font-mono">/v1/traces</code> (OTLP/HTTP, JSON or protobuf). The span&apos;s <code className="text-violet-400 font-mono">trace_id</code> becomes the Cernova run, each GenAI span becomes a step, and per-step fingerprinting and anomaly detection run exactly as they do for SDK ingests.</P>
       <Callout type="info">
-        OTel spans rarely carry cost, so cost-based L5 detection is skipped for OTel traces — latency and token detection apply as normal. Use a Cernova SDK if you want cost tracking.
+        OTel spans rarely carry cost, so cost-based statistical detection is skipped for OTel traces — latency and token detection apply as normal. Use a Cernova SDK if you want cost tracking.
       </Callout>
 
       <H2>Vercel AI SDK</H2>
@@ -659,7 +658,7 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
     "secret_key": "sk-lf-...",
     "host": "https://cloud.langfuse.com"
   }'`}</Code>
-      <P>Credentials are validated immediately — bad keys return <code className="text-violet-400 font-mono">400</code> — then the import runs in the background. Once a step crosses 20 imported calls, L5 statistical detection activates automatically.</P>
+      <P>Credentials are validated immediately — bad keys return <code className="text-violet-400 font-mono">400</code> — then the import runs in the background. Once a step crosses 20 imported calls, statistical detection activates automatically.</P>
       <Callout type="info">
         Imported calls are tagged <code className="text-gray-300">source=langfuse</code> and deduplicated on their Langfuse observation id, so you can re-run the import any time without creating duplicates.
       </Callout>

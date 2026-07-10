@@ -153,7 +153,7 @@ function BaselineMini() {
       </div>
       <div className="flex justify-between">
         <span className="text-gray-500">baseline n={n}</span>
-        <span className={warm ? 'text-green-500' : 'text-gray-700'}>{warm ? 'L5 active ✓' : 'warming…'}</span>
+        <span className={warm ? 'text-green-500' : 'text-gray-700'}>{warm ? 'baseline active ✓' : 'warming…'}</span>
       </div>
     </div>
   )
@@ -186,16 +186,16 @@ function Pillars() {
 
 // ── Detection layer explorer (kept — interactive) ────────────────────────────
 
-type LayerKey = 'L1' | 'L2' | 'L4' | 'L5'
+type LayerKey = 'hard' | 'format' | 'numeric' | 'statistical'
 const LAYERS: Record<LayerKey, { name: string; accent: string; desc: string; example: { text: string; c?: string }[] }> = {
-  L1: { name: 'Hard failures', accent: 'text-red-400', desc: 'Deterministic. status_success=false, non-empty error, token accounting mismatch, negative values. Any hit → 100pts → immediate trigger. No heuristics.', example: [{ text: 'status_success: false', c: 'text-red-400' }, { text: 'error: "context_length_exceeded"', c: 'text-red-300' }, { text: '' }, { text: '↳ 1001  status_failure  +100pts  TRIGGERED', c: 'text-red-400' }] },
-  L2: { name: 'Format violations', accent: 'text-orange-400', desc: 'Prompt-implied contracts. "Return JSON" → output must be JSON. Yes/no prompts, enum constraints, strict JSON (no fences). Learned contracts fold in here too.', example: [{ text: 'prompt:  "return JSON: name, email"', c: 'text-gray-600' }, { text: 'output:  "The user appears to be..."', c: 'text-orange-300' }, { text: '' }, { text: '↳ 2001  json_contract_violation  +50pts', c: 'text-orange-400' }] },
-  L4: { name: 'Numeric limits', accent: 'text-blue-400', desc: 'Adaptive p95 thresholds for latency, tokens, cost — scoped per step profile. Cross-field plausibility. Stall detection. Defers to L5 once a baseline is warm.', example: [{ text: 'latency_ms:    8400', c: 'text-blue-300' }, { text: 'output_tokens: 3', c: 'text-blue-300' }, { text: '' }, { text: '↳ 4007  high_latency_low_output  +20pts', c: 'text-blue-400' }] },
-  L5: { name: 'Statistical baseline', accent: 'text-violet-400', desc: 'IQR/log-normal detection against each step’s own call history. Tukey fence in log space — catches multiplicative outliers (5× slower) z-scores miss. Activates after 20 clean calls.', example: [{ text: 'baseline: Q1=240ms Q3=340ms IQR=0.35', c: 'text-gray-600' }, { text: 'fence: e^(log(Q3)+2.5×IQR) ≈ 510ms', c: 'text-gray-600' }, { text: 'observed: 1840ms → +3.2×IQR', c: 'text-violet-300' }, { text: '' }, { text: '↳ 5001  latency_iqr_fence  +30pts', c: 'text-violet-400' }] },
+  hard: { name: 'Hard failures', accent: 'text-red-400', desc: 'Deterministic. status_success=false, non-empty error, token accounting mismatch, negative values. Any hit → 100pts → immediate trigger. No heuristics.', example: [{ text: 'status_success: false', c: 'text-red-400' }, { text: 'error: "context_length_exceeded"', c: 'text-red-300' }, { text: '' }, { text: '↳ 1001  status_failure  +100pts  TRIGGERED', c: 'text-red-400' }] },
+  format: { name: 'Format violations', accent: 'text-orange-400', desc: 'Prompt-implied contracts. "Return JSON" → output must be JSON. Yes/no prompts, enum constraints, strict JSON (no fences). Learned contracts fold in here too.', example: [{ text: 'prompt:  "return JSON: name, email"', c: 'text-gray-600' }, { text: 'output:  "The user appears to be..."', c: 'text-orange-300' }, { text: '' }, { text: '↳ 2001  json_contract_violation  +50pts', c: 'text-orange-400' }] },
+  numeric: { name: 'Numeric limits', accent: 'text-blue-400', desc: 'Adaptive p95 thresholds for latency, tokens, cost — scoped per step profile. Cross-field plausibility. Stall detection. Defers to the statistical layer once a baseline is warm.', example: [{ text: 'latency_ms:    8400', c: 'text-blue-300' }, { text: 'output_tokens: 3', c: 'text-blue-300' }, { text: '' }, { text: '↳ 4007  high_latency_low_output  +20pts', c: 'text-blue-400' }] },
+  statistical: { name: 'Statistical baseline', accent: 'text-violet-400', desc: 'IQR/log-normal detection against each step’s own call history. Tukey fence in log space — catches multiplicative outliers (5× slower) z-scores miss. Activates after 20 clean calls.', example: [{ text: 'baseline: Q1=240ms Q3=340ms IQR=0.35', c: 'text-gray-600' }, { text: 'fence: e^(log(Q3)+2.5×IQR) ≈ 510ms', c: 'text-gray-600' }, { text: 'observed: 1840ms → +3.2×IQR', c: 'text-violet-300' }, { text: '' }, { text: '↳ 5001  latency_iqr_fence  +30pts', c: 'text-violet-400' }] },
 }
 
 function LayerExplorer() {
-  const [active, setActive] = useState<LayerKey | null>('L5')
+  const [active, setActive] = useState<LayerKey | null>('statistical')
   const layers = Object.keys(LAYERS) as LayerKey[]
   return (
     <div>
@@ -204,8 +204,7 @@ function LayerExplorer() {
           const l = LAYERS[k]; const on = active === k
           return (
             <button key={k} onClick={() => setActive(on ? null : k)} className={['p-5 text-left transition-colors', on ? 'bg-white text-black' : 'bg-black hover:bg-neutral-900'].join(' ')}>
-              <div className={`text-xs font-bold font-mono mb-1 ${on ? 'text-black' : l.accent}`}>{k}</div>
-              <div className={`text-sm font-sans font-bold ${on ? 'text-black' : 'text-white'}`}>{l.name}</div>
+              <div className={`text-sm font-sans font-bold ${on ? 'text-black' : l.accent}`}>{l.name}</div>
               <div className={`text-[10px] font-mono mt-3 ${on ? 'text-gray-600' : 'text-gray-700'}`}>{on ? 'click to close' : 'expand →'}</div>
             </button>
           )
@@ -215,7 +214,7 @@ function LayerExplorer() {
         <div className="border border-neutral-800 border-t-0 p-6 bg-neutral-950">
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div>
-              <div className={`text-[10px] font-mono font-bold uppercase tracking-widest mb-3 ${LAYERS[active].accent}`}>{active} — {LAYERS[active].name}</div>
+              <div className={`text-[10px] font-mono font-bold uppercase tracking-widest mb-3 ${LAYERS[active].accent}`}>{LAYERS[active].name}</div>
               <p className="text-sm font-mono text-gray-400 leading-7">{LAYERS[active].desc}</p>
             </div>
             <div className="bg-black border border-neutral-800 p-4 font-mono text-xs leading-6">
@@ -394,7 +393,7 @@ export default function LandingPage() {
           <div className="flex items-end justify-between mb-8">
             <div>
               <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-3">Inside the engine</p>
-              <h2 className="font-sans font-black text-4xl sm:text-5xl text-white">L1 · L2 · L4 · L5</h2>
+              <h2 className="font-sans font-black text-4xl sm:text-5xl text-white">Hard · Format · Numeric · Statistical</h2>
             </div>
             <p className="font-mono text-xs text-gray-600 max-w-xs text-right leading-6 hidden lg:block">Four layers, each catching something different. Scores accumulate — once total ≥ 100pts, it fires.</p>
           </div>
