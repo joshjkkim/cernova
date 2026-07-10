@@ -1520,26 +1520,44 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 const inputCls = 'bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20 w-full';
 
 function ImportSection({ project }: { project: Project }) {
+  const [provider, setProvider]   = useState<'langfuse' | 'langsmith'>('langfuse');
   const [publicKey, setPublicKey] = useState('');
   const [secretKey, setSecretKey] = useState('');
-  const [host, setHost]           = useState('https://cloud.langfuse.com');
+  const [lfHost, setLfHost]       = useState('https://cloud.langfuse.com');
+  const [apiKey, setApiKey]       = useState('');
+  const [lsHost, setLsHost]       = useState('https://api.smith.langchain.com');
+  const [sessions, setSessions]   = useState('');
   const [importing, setImporting] = useState(false);
   const [msg, setMsg]             = useState<{ ok: boolean; text: string } | null>(null);
+
+  const canImport = provider === 'langfuse'
+    ? publicKey.trim() !== '' && secretKey.trim() !== ''
+    : apiKey.trim() !== '';
 
   async function runImport() {
     setImporting(true); setMsg(null);
     try {
-      const res = await fetch(`${BACKEND}/import/langfuse`, {
+      const endpoint = provider === 'langfuse' ? '/import/langfuse' : '/import/langsmith';
+      const body = provider === 'langfuse'
+        ? { public_key: publicKey.trim(), secret_key: secretKey.trim(), host: lfHost.trim() || undefined }
+        : {
+            api_key: apiKey.trim(),
+            host: lsHost.trim() || undefined,
+            session_ids: sessions.trim()
+              ? sessions.split(',').map(s => s.trim()).filter(Boolean)
+              : undefined,
+          };
+      const res = await fetch(`${BACKEND}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${project.API_KEY}` },
-        body: JSON.stringify({ public_key: publicKey.trim(), secret_key: secretKey.trim(), host: host.trim() || undefined }),
+        body: JSON.stringify(body),
       });
       if (!res.ok) {
         const detail = await res.json().then(d => d.detail).catch(() => null);
         throw new Error(detail || `HTTP ${res.status}`);
       }
       setMsg({ ok: true, text: 'Import started — baselines warm in the background. Check the steps tab shortly.' });
-      setPublicKey(''); setSecretKey('');
+      setPublicKey(''); setSecretKey(''); setApiKey(''); setSessions('');
     } catch (e) {
       setMsg({ ok: false, text: e instanceof Error ? e.message : String(e) });
     } finally {
@@ -1550,25 +1568,53 @@ function ImportSection({ project }: { project: Project }) {
   return (
     <SettingSection
       title="Warm-start import"
-      description="Import your Langfuse generation history to build per-step baselines from real traffic instead of waiting for live calls. Backdated, deduplicated, and alert-suppressed — re-running is safe."
+      description="Import your existing traces to build per-step baselines from real traffic instead of waiting for live calls. Backdated, deduplicated, and alert-suppressed — re-running is safe."
     >
       <div className="space-y-4">
-        <Field label="Langfuse public key">
-          <input type="text" value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk-lf-…" className={inputCls} />
+        <Field label="Source">
+          <SegmentedControl
+            options={[
+              { value: 'langfuse'  as const, label: 'Langfuse' },
+              { value: 'langsmith' as const, label: 'LangSmith' },
+            ]}
+            value={provider}
+            onChange={setProvider}
+          />
         </Field>
-        <Field label="Langfuse secret key">
-          <input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder="sk-lf-…" className={inputCls} />
-        </Field>
-        <Field label="Host">
-          <input type="url" value={host} onChange={e => setHost(e.target.value)} placeholder="https://cloud.langfuse.com" className={inputCls} />
-        </Field>
+
+        {provider === 'langfuse' ? (
+          <>
+            <Field label="Langfuse public key">
+              <input type="text" value={publicKey} onChange={e => setPublicKey(e.target.value)} placeholder="pk-lf-…" className={inputCls} />
+            </Field>
+            <Field label="Langfuse secret key">
+              <input type="password" value={secretKey} onChange={e => setSecretKey(e.target.value)} placeholder="sk-lf-…" className={inputCls} />
+            </Field>
+            <Field label="Host">
+              <input type="url" value={lfHost} onChange={e => setLfHost(e.target.value)} placeholder="https://cloud.langfuse.com" className={inputCls} />
+            </Field>
+          </>
+        ) : (
+          <>
+            <Field label="LangSmith API key">
+              <input type="password" value={apiKey} onChange={e => setApiKey(e.target.value)} placeholder="lsv2_…" className={inputCls} />
+            </Field>
+            <Field label="Host">
+              <input type="url" value={lsHost} onChange={e => setLsHost(e.target.value)} placeholder="https://api.smith.langchain.com" className={inputCls} />
+            </Field>
+            <Field label="Project IDs (optional)">
+              <input type="text" value={sessions} onChange={e => setSessions(e.target.value)} placeholder="comma-separated — leave blank to import all projects" className={inputCls} />
+            </Field>
+          </>
+        )}
+
         {msg && <p className={['font-mono text-xs', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
         <button
           onClick={runImport}
-          disabled={importing || !publicKey.trim() || !secretKey.trim()}
+          disabled={importing || !canImport}
           className="font-mono text-xs font-bold px-5 py-2.5 border border-violet-700/60 text-violet-400 hover:bg-violet-900/20 hover:border-violet-500 disabled:opacity-40 transition-colors"
         >
-          {importing ? 'starting…' : 'import from langfuse'}
+          {importing ? 'starting…' : `import from ${provider}`}
         </button>
       </div>
     </SettingSection>
@@ -1596,6 +1642,7 @@ function SettingsTab({ project }: { project: Project }) {
   const [saving, setSaving]         = useState(false);
   const [testing, setTesting]       = useState(false);
   const [msg, setMsg]               = useState<{ ok: boolean; text: string } | null>(null);
+  const [group, setGroup]           = useState<'alerts' | 'detection' | 'data' | 'project'>('alerts');
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
   useEffect(() => {
@@ -1670,10 +1717,26 @@ function SettingsTab({ project }: { project: Project }) {
   ];
 
   return (
-    <div className="max-w-xl space-y-0">
+    <div className="max-w-xl">
 
-      <ImportSection project={project} />
+      <div className="mb-8">
+        <SegmentedControl
+          options={[
+            { value: 'alerts'    as const, label: 'Alerts' },
+            { value: 'detection' as const, label: 'Detection' },
+            { value: 'data'      as const, label: 'Data' },
+            { value: 'project'   as const, label: 'Project' },
+          ]}
+          value={group}
+          onChange={setGroup}
+        />
+      </div>
 
+      <div className="space-y-0">
+
+      {group === 'data' && <ImportSection project={project} />}
+
+      {group === 'alerts' && <>
       <SettingSection
         title="Slack alerts"
         description="Paste an Incoming Webhook URL to receive alerts in Slack."
@@ -1798,9 +1861,11 @@ function SettingsTab({ project }: { project: Project }) {
           )}
         </div>
       </SettingSection>
+      </>}
 
+      {group === 'detection' && <>
       <SettingSection
-        title="L4 anomaly thresholds"
+        title="Numeric thresholds"
         description="Latency, token, and cost limits for anomaly detection."
       >
         <div className="space-y-4">
@@ -1868,17 +1933,9 @@ function SettingsTab({ project }: { project: Project }) {
           <span className="font-mono text-[10px] text-gray-700">USD / month — leave blank to disable</span>
         </div>
       </SettingSection>
+      </>}
 
-      <div className="pt-8 border-t border-white/8">
-        {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
-        <button
-          onClick={save} disabled={saving}
-          className="font-mono text-xs font-bold px-5 py-2.5 bg-white text-black hover:bg-gray-100 disabled:opacity-50 transition-colors"
-        >
-          {saving ? 'saving…' : 'save settings'}
-        </button>
-      </div>
-
+      {group === 'project' && (
       <SettingSection title="Project details">
         <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">
           {[
@@ -1893,6 +1950,21 @@ function SettingsTab({ project }: { project: Project }) {
           ))}
         </div>
       </SettingSection>
+      )}
+
+      </div>
+
+      {(group === 'alerts' || group === 'detection') && (
+      <div className="pt-8 border-t border-white/8">
+        {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
+        <button
+          onClick={save} disabled={saving}
+          className="font-mono text-xs font-bold px-5 py-2.5 bg-white text-black hover:bg-gray-100 disabled:opacity-50 transition-colors"
+        >
+          {saving ? 'saving…' : 'save settings'}
+        </button>
+      </div>
+      )}
 
     </div>
   );
