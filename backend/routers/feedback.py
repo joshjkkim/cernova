@@ -66,7 +66,9 @@ def list_contracts(request: Request) -> dict:
             "step_name":       row.get("step_name"),
             "status":          c.get("status"),
             "format":          c.get("format"),
+            "json_rate":       c.get("json_rate"),
             "required_keys":   c.get("required_keys", []),
+            "keys":            c.get("keys", {}),
             "sample_count":    c.get("sample_count"),
         })
     return {"contracts": contracts}
