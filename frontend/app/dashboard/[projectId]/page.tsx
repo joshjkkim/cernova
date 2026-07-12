@@ -62,12 +62,23 @@ interface Run {
 
 type Tab = 'overview' | 'logs' | 'runs' | 'anomalies' | 'steps' | 'contracts' | 'usage' | 'settings';
 
+interface KeySpec {
+  name: string;
+  presence: number;            // fraction of JSON outputs containing this key
+  types: string[];             // JSON types seen for this key
+  enum_values?: string[] | null;
+  num_min?: number | null;
+  num_max?: number | null;
+}
+
 interface ContractRow {
   step_profile_id: string;
   step_name: string | null;
   status: 'observing' | 'proposed' | 'enforced' | 'rejected';
   format: string | null;
+  json_rate?: number | null;
   required_keys: string[];
+  keys?: Record<string, KeySpec>;
   sample_count: number | null;
 }
 
@@ -307,10 +318,10 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
   if (authError) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
+      <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] flex items-center justify-center">
         <div className="text-center">
-          <p className="font-mono text-xs text-red-400 mb-4">You don&apos;t have access to this project.</p>
-          <a href="/dashboard" className="font-mono text-xs text-gray-600 hover:text-white underline">← back to dashboard</a>
+          <p className="font-mono text-xs text-[#e0533d] mb-4">You don&apos;t have access to this project.</p>
+          <a href="/dashboard" className="font-mono text-xs text-[#9a91ad] hover:text-[#e9e4f0] underline">← back to dashboard</a>
         </div>
       </main>
     );
@@ -318,8 +329,8 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
   if (!project) {
     return (
-      <main className="min-h-screen bg-black text-white flex items-center justify-center">
-        <p className="font-mono text-xs text-gray-700">loading…</p>
+      <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] flex items-center justify-center">
+        <p className="font-mono text-xs text-[#7c7291]">loading…</p>
       </main>
     );
   }
@@ -339,30 +350,30 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   ];
 
   return (
-    <main className="min-h-screen bg-black text-white antialiased">
+    <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] antialiased">
 
       {/* Top bar */}
-      <div className="border-b border-white/8 px-4 sm:px-8 py-4">
+      <div className="border-b border-[#3a2f4e] px-4 sm:px-8 py-4">
         <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2 font-mono text-xs">
-              <a href="/dashboard" className="text-gray-600 hover:text-white transition-colors shrink-0">projects</a>
-              <span className="text-white/15">/</span>
-              <span className="text-white font-bold truncate">{project.name}</span>
+              <a href="/dashboard" className="text-[#9a91ad] hover:text-[#e9e4f0] transition-colors shrink-0">projects</a>
+              <span className="text-[#7c7291]">/</span>
+              <span className="text-[#e9e4f0] font-bold truncate">{project.name}</span>
             </div>
             <div className="flex items-center gap-2 mt-1.5">
               <span className={[
                 'w-1.5 h-1.5 rounded-full shrink-0',
-                status === 'connected'  ? 'bg-green-500' : '',
-                status === 'connecting' ? 'bg-yellow-500 animate-pulse' : '',
-                status === 'error'      ? 'bg-red-500' : '',
+                status === 'connected'  ? 'bg-[#7fb59a]' : '',
+                status === 'connecting' ? 'bg-[#d9a441] animate-pulse' : '',
+                status === 'error'      ? 'bg-[#e0533d]' : '',
               ].join(' ')} />
-              <span className="font-mono text-[10px] text-gray-700">
+              <span className="font-mono text-[10px] text-[#7c7291]">
                 {status === 'connected' ? 'live' : status === 'connecting' ? 'connecting…' : 'realtime error'}
               </span>
             </div>
           </div>
-          <code className="hidden sm:block font-mono text-[11px] text-green-500 border border-white/8 px-3 py-1.5 max-w-[200px] truncate shrink-0">
+          <code className="hidden sm:block font-mono text-[11px] text-[#7fb59a] border border-[#3a2f4e] px-3 py-1.5 max-w-[200px] truncate shrink-0">
             {project.API_KEY}
           </code>
         </div>
@@ -376,8 +387,8 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
               className={[
                 'px-4 py-2 font-mono text-xs border-b-2 transition-colors whitespace-nowrap shrink-0',
                 tab === t.id
-                  ? 'border-violet-500 text-violet-400'
-                  : 'border-transparent text-gray-600 hover:text-gray-300',
+                  ? 'border-[#b794f4] text-[#c4a6f2]'
+                  : 'border-transparent text-[#9a91ad] hover:text-[#c9c2d6]',
               ].join(' ')}
             >
               {t.label}
@@ -403,7 +414,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
                 <SearchInput value={logsQuery} onChange={setLogsQuery} placeholder="Filter by step, model, run ID, error…" />
                 {filtered.length === 0
                   ? <EmptyState text="No calls match that filter." />
-                  : <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">{filtered.map((c) => <CallRow key={`${c.id}`} call={c} anomaly={c.run_id ? anomalyMap.get(c.run_id) : undefined} onSelect={setSelectedCall} />)}</div>
+                  : <div className="bg-[#281f38] border border-[#3a2f4e] divide-y divide-[#3a2f4e]">{filtered.map((c) => <CallRow key={`${c.id}`} call={c} anomaly={c.run_id ? anomalyMap.get(c.run_id) : undefined} onSelect={setSelectedCall} />)}</div>
                 }
               </div>
             );
@@ -422,7 +433,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
                 <SearchInput value={runsQuery} onChange={setRunsQuery} placeholder="Filter by run ID, step name, model…" />
                 {filtered.length === 0
                   ? <EmptyState text="No runs match that filter." />
-                  : <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">{filtered.map((r) => <RunCard key={r.runId} run={r} anomaly={anomalyMap.get(r.runId)} onClick={() => setSelectedRunId(r.runId)} />)}</div>
+                  : <div className="bg-[#281f38] border border-[#3a2f4e] divide-y divide-[#3a2f4e]">{filtered.map((r) => <RunCard key={r.runId} run={r} anomaly={anomalyMap.get(r.runId)} onClick={() => setSelectedRunId(r.runId)} />)}</div>
                 }
               </div>
             );
@@ -432,25 +443,25 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
           <div>
             <button
               onClick={() => { setSelectedRunId(null); setAnalysis(null); }}
-              className="font-mono text-xs text-gray-600 hover:text-white mb-6 transition-colors flex items-center gap-1.5"
+              className="font-mono text-xs text-[#9a91ad] hover:text-[#e9e4f0] mb-6 transition-colors flex items-center gap-1.5"
             >
               ← runs
             </button>
             <div className="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-4">
               <div className="min-w-0">
-                <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-1">Run ID</p>
-                <code className="font-mono text-xs text-gray-300 break-all">{selectedRun.runId}</code>
-                <div className="flex flex-wrap gap-4 mt-2 font-mono text-[11px] text-gray-600">
+                <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-1">Run ID</p>
+                <code className="font-mono text-xs text-[#c9c2d6] break-all">{selectedRun.runId}</code>
+                <div className="flex flex-wrap gap-4 mt-2 font-mono text-[11px] text-[#9a91ad]">
                   <span>{selectedRun.steps.length} steps</span>
                   <span>${selectedRun.totalCost.toFixed(6)}</span>
                   <span>{selectedRun.totalLatency}ms total</span>
-                  {selectedRun.errorCount > 0 && <span className="text-red-400">{selectedRun.errorCount} error{selectedRun.errorCount > 1 ? 's' : ''}</span>}
+                  {selectedRun.errorCount > 0 && <span className="text-[#e0533d]">{selectedRun.errorCount} error{selectedRun.errorCount > 1 ? 's' : ''}</span>}
                 </div>
               </div>
               <button
                 onClick={() => analyzeRun(selectedRun.runId)}
                 disabled={analyzing}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 font-mono text-xs border border-violet-700/60 text-violet-400 hover:bg-violet-900/20 hover:border-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 font-mono text-xs border border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               >
                 {analyzing ? <><span className="animate-spin text-[10px]">◌</span> analyzing…</> : <>✦ analyze run</>}
               </button>
@@ -529,7 +540,7 @@ function OverviewTab({ calls }: { calls: Call[] }) {
       </div>
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-white/8">
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-px bg-[#3a2f4e]">
         <StatCard label="Runs"        value={filteredRuns.length.toString()} />
         <StatCard label="Calls"       value={fc.length.toString()} />
         <StatCard label="Total cost"  value={`$${totalCost.toFixed(4)}`} mono />
@@ -540,25 +551,25 @@ function OverviewTab({ calls }: { calls: Call[] }) {
 
       {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-[#0a0a0a] border border-white/8 p-5">
-          <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-4">Calls · {cfg.label}</p>
-          <BarChart data={buckets.map(b => b.calls)} color="bg-violet-500" />
+        <div className="lg:col-span-2 bg-[#281f38] border border-[#3a2f4e] p-5">
+          <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-4">Calls · {cfg.label}</p>
+          <BarChart data={buckets.map(b => b.calls)} color="bg-[#b794f4]" />
           <ChartAxis first={firstLabel} last={lastLabel} />
         </div>
-        <div className="bg-[#0a0a0a] border border-white/8 p-5">
-          <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-4">Models</p>
+        <div className="bg-[#281f38] border border-[#3a2f4e] p-5">
+          <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-4">Models</p>
           {models.length === 0 ? (
-            <p className="font-mono text-xs text-gray-700 mt-8 text-center">no data</p>
+            <p className="font-mono text-xs text-[#7c7291] mt-8 text-center">no data</p>
           ) : (
             <div className="space-y-4">
               {models.map(([model, { calls: cnt, cost }]) => (
                 <div key={model}>
                   <div className="flex justify-between items-baseline mb-1.5">
-                    <span className="font-mono text-[11px] text-gray-400 truncate max-w-[140px]">{model.replace('claude-', '')}</span>
-                    <span className="font-mono text-[11px] text-gray-600 shrink-0 ml-2">{cnt} · ${cost.toFixed(4)}</span>
+                    <span className="font-mono text-[11px] text-[#b3abc4] truncate max-w-[140px]">{model.replace('claude-', '')}</span>
+                    <span className="font-mono text-[11px] text-[#9a91ad] shrink-0 ml-2">{cnt} · ${cost.toFixed(4)}</span>
                   </div>
-                  <div className="h-px bg-white/8">
-                    <div className="h-full bg-violet-500" style={{ width: `${(cnt / totalModelCalls) * 100}%` }} />
+                  <div className="h-px bg-[#3a2f4e]">
+                    <div className="h-full bg-[#b794f4]" style={{ width: `${(cnt / totalModelCalls) * 100}%` }} />
                   </div>
                 </div>
               ))}
@@ -568,14 +579,14 @@ function OverviewTab({ calls }: { calls: Call[] }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="bg-[#0a0a0a] border border-white/8 p-5">
-          <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-4">Cost · {cfg.label}</p>
-          <BarChart data={buckets.map(b => b.cost)} color="bg-emerald-500" />
+        <div className="bg-[#281f38] border border-[#3a2f4e] p-5">
+          <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-4">Cost · {cfg.label}</p>
+          <BarChart data={buckets.map(b => b.cost)} color="bg-[#b794f4]" />
           <ChartAxis first={firstLabel} last={lastLabel} />
         </div>
-        <div className="bg-[#0a0a0a] border border-white/8 p-5">
-          <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-4">Tokens · {cfg.label}</p>
-          <BarChart data={buckets.map(b => b.tokens)} color="bg-blue-500" />
+        <div className="bg-[#281f38] border border-[#3a2f4e] p-5">
+          <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-4">Tokens · {cfg.label}</p>
+          <BarChart data={buckets.map(b => b.tokens)} color="bg-[#b794f4]" />
           <ChartAxis first={firstLabel} last={lastLabel} />
         </div>
       </div>
@@ -583,15 +594,15 @@ function OverviewTab({ calls }: { calls: Call[] }) {
       <StepBreakdown calls={fc} />
 
       {errorCount > 0 && (
-        <div className="border-l-2 border-red-600 pl-5 py-3">
-          <p className="font-mono text-[10px] text-red-600 uppercase tracking-widest mb-3">Recent errors</p>
+        <div className="border-l-2 border-[#e0533d] pl-5 py-3">
+          <p className="font-mono text-[10px] text-[#e0533d] uppercase tracking-widest mb-3">Recent errors</p>
           <div className="space-y-2">
             {fc.filter((c) => c.status_success === false).slice(0, 5).map((c) => (
               <div key={c.id} className="flex items-start gap-3 font-mono text-[11px]">
-                <span className="text-red-600 shrink-0">✕</span>
-                <span className="text-gray-400 shrink-0">{c.step_name ?? '—'}</span>
-                <span className="text-red-400 truncate">{c.error ?? 'unknown error'}</span>
-                <span className="text-gray-700 shrink-0 ml-auto">
+                <span className="text-[#e0533d] shrink-0">✕</span>
+                <span className="text-[#b3abc4] shrink-0">{c.step_name ?? '—'}</span>
+                <span className="text-[#e0533d] truncate">{c.error ?? 'unknown error'}</span>
+                <span className="text-[#7c7291] shrink-0 ml-auto">
                   {c.created_at ? new Date(c.created_at).toLocaleTimeString() : ''}
                 </span>
               </div>
@@ -624,8 +635,8 @@ function ChartAxis({ first, last }: { first?: Date; last?: Date }) {
   const fmt = (d?: Date) => d?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) ?? '';
   return (
     <div className="flex justify-between mt-2">
-      <span className="font-mono text-[10px] text-gray-700">{fmt(first)}</span>
-      <span className="font-mono text-[10px] text-gray-700">{fmt(last)}</span>
+      <span className="font-mono text-[10px] text-[#7c7291]">{fmt(first)}</span>
+      <span className="font-mono text-[10px] text-[#7c7291]">{fmt(last)}</span>
     </div>
   );
 }
@@ -638,11 +649,11 @@ function CallRow({ call, anomaly, onSelect }: { call: Call; anomaly?: AnomalyRun
     <div
       onClick={() => onSelect(call)}
       className={[
-        'border-l-2 px-4 py-3 font-mono text-xs grid grid-cols-[1fr_auto] gap-x-4 cursor-pointer hover:bg-white/2 transition-colors',
-        isError          ? 'border-red-600'
-          : anomaly?.is_critical ? 'border-red-600/50'
-          : anomaly              ? 'border-yellow-600/60'
-          : 'border-white/10',
+        'border-l-2 px-4 py-3 font-mono text-xs grid grid-cols-[1fr_auto] gap-x-4 cursor-pointer hover:bg-[#2d2440] transition-colors',
+        isError          ? 'border-[#e0533d]'
+          : anomaly?.is_critical ? 'border-[#e0533d]/50'
+          : anomaly              ? 'border-[#d9c964]/60'
+          : 'border-[#3a2f4e]',
       ].join(' ')}
     >
       <div className="space-y-1 min-w-0">
@@ -653,22 +664,22 @@ function CallRow({ call, anomaly, onSelect }: { call: Call; anomaly?: AnomalyRun
               {anomaly.is_critical ? `critical ${anomaly.total_score}pts` : `warn ${anomaly.total_score}pts`}
             </Badge>
           )}
-          <span className="text-gray-200 font-bold">{call.step_name ?? '—'}</span>
-          <span className="text-gray-600">{call.model ?? ''}</span>
-          {call.step_index != null && <span className="text-gray-700">#{call.step_index + 1}</span>}
+          <span className="text-[#c9c2d6] font-bold">{call.step_name ?? '—'}</span>
+          <span className="text-[#9a91ad]">{call.model ?? ''}</span>
+          {call.step_index != null && <span className="text-[#7c7291]">#{call.step_index + 1}</span>}
         </div>
-        {isError && call.error && <div className="text-red-400 truncate">{call.error}</div>}
+        {isError && call.error && <div className="text-[#e0533d] truncate">{call.error}</div>}
         {!isError && (
-          <div className="flex flex-wrap gap-x-4 text-gray-600">
-            <span><span className="text-gray-700">tokens </span>{call.input_tokens ?? 0} / {call.output_tokens ?? 0}</span>
-            {call.cost != null && <span><span className="text-gray-700">cost </span>${Number(call.cost).toFixed(6)}</span>}
+          <div className="flex flex-wrap gap-x-4 text-[#9a91ad]">
+            <span><span className="text-[#7c7291]">tokens </span>{call.input_tokens ?? 0} / {call.output_tokens ?? 0}</span>
+            {call.cost != null && <span><span className="text-[#7c7291]">cost </span>${Number(call.cost).toFixed(6)}</span>}
           </div>
         )}
-        <div className="text-gray-700 truncate">run {call.run_id ?? '—'}</div>
+        <div className="text-[#7c7291] truncate">run {call.run_id ?? '—'}</div>
       </div>
       <div className="text-right whitespace-nowrap">
-        {call.latency_ms != null && <div className="text-gray-300">{call.latency_ms}ms</div>}
-        {call.created_at && <div className="text-gray-700 text-[10px]">{new Date(call.created_at).toLocaleTimeString()}</div>}
+        {call.latency_ms != null && <div className="text-[#c9c2d6]">{call.latency_ms}ms</div>}
+        {call.created_at && <div className="text-[#7c7291] text-[10px]">{new Date(call.created_at).toLocaleTimeString()}</div>}
       </div>
     </div>
   );
@@ -682,11 +693,11 @@ function RunCard({ run, anomaly, onClick }: { run: Run; anomaly?: AnomalyRun; on
     <button
       onClick={onClick}
       className={[
-        'w-full text-left px-5 py-4 border-l-2 hover:bg-white/2 transition-colors',
-        anomaly?.is_critical ? 'border-red-600'
-          : anomaly ? 'border-yellow-600'
-          : hasError ? 'border-red-600/50'
-          : 'border-white/10',
+        'w-full text-left px-5 py-4 border-l-2 hover:bg-[#2d2440] transition-colors',
+        anomaly?.is_critical ? 'border-[#e0533d]'
+          : anomaly ? 'border-[#d9c964]'
+          : hasError ? 'border-[#e0533d]/50'
+          : 'border-[#3a2f4e]',
       ].join(' ')}
     >
       <div className="flex items-center justify-between">
@@ -698,9 +709,9 @@ function RunCard({ run, anomaly, onClick }: { run: Run; anomaly?: AnomalyRun; on
                 {anomaly.is_critical ? `critical ${anomaly.total_score}pts` : `warn ${anomaly.total_score}pts`}
               </Badge>
             )}
-            <code className="font-mono text-[11px] text-gray-400">{run.runId.slice(0, 16)}…</code>
+            <code className="font-mono text-[11px] text-[#b3abc4]">{run.runId.slice(0, 16)}…</code>
           </div>
-          <div className="flex flex-wrap gap-x-4 font-mono text-[11px] text-gray-600">
+          <div className="flex flex-wrap gap-x-4 font-mono text-[11px] text-[#9a91ad]">
             <span>{run.steps.length} step{run.steps.length !== 1 ? 's' : ''}</span>
             <span>${run.totalCost.toFixed(6)}</span>
             <span>{run.totalLatency}ms</span>
@@ -708,13 +719,13 @@ function RunCard({ run, anomaly, onClick }: { run: Run; anomaly?: AnomalyRun; on
           </div>
           <div className="flex gap-1 flex-wrap">
             {run.steps.map((s) => (
-              <span key={s.id} className="font-mono text-[10px] bg-white/5 text-gray-500 px-1.5 py-0.5">
+              <span key={s.id} className="font-mono text-[10px] bg-[#332946] text-[#9a91ad] px-1.5 py-0.5">
                 {s.step_name ?? `step_${(s.step_index ?? 0) + 1}`}
               </span>
             ))}
           </div>
         </div>
-        <div className="font-mono text-[11px] text-gray-700 ml-6 shrink-0">
+        <div className="font-mono text-[11px] text-[#7c7291] ml-6 shrink-0">
           {run.createdAt && new Date(run.createdAt).toLocaleTimeString()}
         </div>
       </div>
@@ -748,7 +759,7 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
 
   return (
     <div className="w-full space-y-2">
-      <div className="flex font-mono text-[10px] text-gray-700 pl-44 mb-1 justify-between pr-1">
+      <div className="flex font-mono text-[10px] text-[#7c7291] pl-44 mb-1 justify-between pr-1">
         <span>0</span>
         <span>{fmtMs(totalMs / 2)}</span>
         <span>{fmtMs(totalMs)}</span>
@@ -761,10 +772,10 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
         const leftPct   = ((startMs - runStart) / totalMs) * 100;
         const widthPct  = Math.max(((endMs - startMs) / totalMs) * 100, 1.5);
 
-        const barColor = isError ? 'bg-red-500'
-          : stepScore >= 50 ? 'bg-red-400/70'
-          : anomalyStep    ? 'bg-yellow-400/70'
-          : 'bg-violet-500';
+        const barColor = isError ? 'bg-[#e0533d]'
+          : stepScore >= 50 ? 'bg-[#e0533d]/70'
+          : anomalyStep    ? 'bg-[#d9c964]/80'
+          : 'bg-[#b794f4]';
 
         return (
           <div key={step.id ?? i} onClick={() => onSelect(step)} className="flex items-center gap-3 group cursor-pointer">
@@ -773,16 +784,16 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
                 <Badge variant={isError ? 'error' : anomalyStep ? 'warning' : 'ok'}>
                   {isError ? 'err' : anomalyStep ? `${stepScore}pt` : 'ok'}
                 </Badge>
-                <span className="font-mono text-[11px] text-gray-300 truncate">{step.step_name ?? `step_${i + 1}`}</span>
+                <span className="font-mono text-[11px] text-[#c9c2d6] truncate">{step.step_name ?? `step_${i + 1}`}</span>
               </div>
-              <div className="font-mono text-[10px] text-gray-700">
+              <div className="font-mono text-[10px] text-[#7c7291]">
                 {step.latency_ms != null ? fmtMs(step.latency_ms) : '—'}
               </div>
             </div>
 
             <div className={[
-              'flex-1 h-8 border border-white/8 relative overflow-hidden transition-colors',
-              'group-hover:border-white/15',
+              'flex-1 h-8 border border-[#3a2f4e] relative overflow-hidden transition-colors',
+              'group-hover:border-[#4a3d63]',
             ].join(' ')}>
               <div
                 className={`absolute top-1.5 bottom-1.5 ${barColor}`}
@@ -790,7 +801,7 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
               />
               {widthPct > 12 && step.latency_ms != null && (
                 <span
-                  className="absolute top-1/2 -translate-y-1/2 font-mono text-[10px] text-white/60 px-2 pointer-events-none"
+                  className="absolute top-1/2 -translate-y-1/2 font-mono text-[10px] text-[#e9e4f0]/70 px-2 pointer-events-none"
                   style={{ left: `${leftPct}%` }}
                 >
                   {fmtMs(step.latency_ms)}
@@ -813,11 +824,11 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
                   className={[
                     'inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 border',
                     score >= 50
-                      ? 'border-red-800/60 text-red-400'
-                      : 'border-yellow-800/40 text-yellow-500',
+                      ? 'border-[#e0533d]/50 text-[#e0533d]'
+                      : 'border-[#d9c964]/40 text-[#d9c964]',
                   ].join(' ')}
                 >
-                  <span className="text-gray-600">{code}</span>
+                  <span className="text-[#9a91ad]">{code}</span>
                   {info && <span>{info.name}</span>}
                   <span>+{score}</span>
                 </span>
@@ -851,28 +862,28 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
 
   return (
     <>
-      <div className="fixed inset-0 bg-black/60 z-40" onClick={onClose} />
-      <div className="fixed right-0 top-0 h-full w-full sm:w-[520px] bg-[#080808] border-l border-white/10 z-50 flex flex-col">
+      <div className="fixed inset-0 bg-[#201a2b]/60 z-40" onClick={onClose} />
+      <div className="fixed right-0 top-0 h-full w-full sm:w-[520px] bg-[#281f38] border-l border-[#3a2f4e] z-50 flex flex-col">
 
         {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-white/8 shrink-0">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-[#3a2f4e] shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <Badge variant={isError ? 'error' : 'ok'}>{isError ? 'error' : 'ok'}</Badge>
-            <span className="font-sans font-bold text-sm text-white truncate">{call.step_name ?? '—'}</span>
-            {call.step_index != null && <span className="font-mono text-[10px] text-gray-700 shrink-0">#{call.step_index + 1}</span>}
+            <span className="font-sans font-bold text-sm text-[#e9e4f0] truncate">{call.step_name ?? '—'}</span>
+            {call.step_index != null && <span className="font-mono text-[10px] text-[#7c7291] shrink-0">#{call.step_index + 1}</span>}
           </div>
-          <button onClick={onClose} className="font-mono text-gray-600 hover:text-white text-xl leading-none ml-4 shrink-0">×</button>
+          <button onClick={onClose} className="font-mono text-[#9a91ad] hover:text-[#e9e4f0] text-xl leading-none ml-4 shrink-0">×</button>
         </div>
 
         {/* Meta strip */}
-        <div className="px-5 py-3 border-b border-white/8 shrink-0">
+        <div className="px-5 py-3 border-b border-[#3a2f4e] shrink-0">
           <div className="flex flex-wrap gap-x-5 gap-y-1 font-mono text-[11px]">
-            <span className="text-gray-700">model <span className="text-gray-400">{call.model ?? '—'}</span></span>
-            <span className="text-gray-700">latency <span className="text-gray-400">{call.latency_ms != null ? `${call.latency_ms}ms` : '—'}</span></span>
-            <span className="text-gray-700">cost <span className="text-gray-400">${Number(call.cost ?? 0).toFixed(6)}</span></span>
-            <span className="text-gray-700">tokens <span className="text-gray-400">{call.input_tokens ?? 0} in / {call.output_tokens ?? 0} out</span></span>
+            <span className="text-[#7c7291]">model <span className="text-[#b3abc4]">{call.model ?? '—'}</span></span>
+            <span className="text-[#7c7291]">latency <span className="text-[#b3abc4]">{call.latency_ms != null ? `${call.latency_ms}ms` : '—'}</span></span>
+            <span className="text-[#7c7291]">cost <span className="text-[#b3abc4]">${Number(call.cost ?? 0).toFixed(6)}</span></span>
+            <span className="text-[#7c7291]">tokens <span className="text-[#b3abc4]">{call.input_tokens ?? 0} in / {call.output_tokens ?? 0} out</span></span>
           </div>
-          <div className="mt-1.5 font-mono text-[10px] text-gray-700 truncate">
+          <div className="mt-1.5 font-mono text-[10px] text-[#7c7291] truncate">
             run {call.run_id ?? '—'}
             {call.created_at && <span className="ml-3">{new Date(call.created_at).toLocaleString()}</span>}
           </div>
@@ -883,27 +894,27 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
 
           {parsed.system && (
             <section>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">System</p>
-              <div className="border-l-2 border-white/10 pl-4 py-1">
-                <pre className="font-mono text-[11px] text-gray-400 whitespace-pre-wrap leading-5">{parsed.system}</pre>
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">System</p>
+              <div className="border-l-2 border-[#3a2f4e] pl-4 py-1">
+                <pre className="font-mono text-[11px] text-[#b3abc4] whitespace-pre-wrap leading-5">{parsed.system}</pre>
               </div>
             </section>
           )}
 
           {parsed.messages && parsed.messages.length > 0 && (
             <section>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">Messages</p>
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">Messages</p>
               <div className="space-y-2">
                 {parsed.messages.map((msg, i) => (
                   <div
                     key={i}
                     className={[
                       'border-l-2 pl-4 py-2',
-                      msg.role === 'user' ? 'border-white/10' : 'border-violet-600',
+                      msg.role === 'user' ? 'border-[#3a2f4e]' : 'border-[#b794f4]',
                     ].join(' ')}
                   >
-                    <p className="font-mono text-[10px] uppercase tracking-wider mb-1 text-gray-700">{msg.role}</p>
-                    <p className="font-mono text-[11px] text-gray-300 whitespace-pre-wrap leading-5">{msg.content}</p>
+                    <p className="font-mono text-[10px] uppercase tracking-wider mb-1 text-[#7c7291]">{msg.role}</p>
+                    <p className="font-mono text-[11px] text-[#c9c2d6] whitespace-pre-wrap leading-5">{msg.content}</p>
                   </div>
                 ))}
               </div>
@@ -912,18 +923,18 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
 
           {call.output_code && (
             <section>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">Output</p>
-              <div className="border-l-2 border-green-700 pl-4 py-1">
-                <pre className="font-mono text-[11px] text-green-300 whitespace-pre-wrap leading-5">{call.output_code}</pre>
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">Output</p>
+              <div className="border-l-2 border-[#7fb59a]/60 pl-4 py-1">
+                <pre className="font-mono text-[11px] text-[#9ec9b0] whitespace-pre-wrap leading-5">{call.output_code}</pre>
               </div>
             </section>
           )}
 
           {isError && call.error && (
             <section>
-              <p className="font-mono text-[10px] text-red-600 uppercase tracking-widest mb-2">Error</p>
-              <div className="border-l-2 border-red-600 pl-4 py-1">
-                <pre className="font-mono text-[11px] text-red-400 leading-5 whitespace-pre-wrap">{call.error}</pre>
+              <p className="font-mono text-[10px] text-[#e0533d] uppercase tracking-widest mb-2">Error</p>
+              <div className="border-l-2 border-[#e0533d] pl-4 py-1">
+                <pre className="font-mono text-[11px] text-[#e0533d] leading-5 whitespace-pre-wrap">{call.error}</pre>
               </div>
             </section>
           )}
@@ -931,8 +942,8 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
           {anomalyStep && anomalyStep.codes.length > 0 && (
             <section>
               <div className="flex items-center justify-between mb-2">
-                <p className="font-mono text-[10px] text-yellow-600 uppercase tracking-widest">Anomaly conditions</p>
-                <span className="font-mono text-[10px] text-gray-700">
+                <p className="font-mono text-[10px] text-[#d9c964] uppercase tracking-widest">Anomaly conditions</p>
+                <span className="font-mono text-[10px] text-[#7c7291]">
                   {anomalyStep.codes.reduce((s, c) => s + c.score, 0)} pts total
                 </span>
               </div>
@@ -943,19 +954,19 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
                   return (
                     <div
                       key={code}
-                      className={`border-l-2 pl-4 py-2 ${isCritical ? 'border-red-600' : 'border-yellow-600'}`}
+                      className={`border-l-2 pl-4 py-2 ${isCritical ? 'border-[#e0533d]' : 'border-[#d9c964]'}`}
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        <span className="font-mono text-[10px] text-gray-600">{code}</span>
-                        <span className={`font-mono text-[11px] font-bold ${isCritical ? 'text-red-300' : 'text-yellow-300'}`}>
+                        <span className="font-mono text-[10px] text-[#9a91ad]">{code}</span>
+                        <span className={`font-mono text-[11px] font-bold ${isCritical ? 'text-[#e0533d]' : 'text-[#e6d77f]'}`}>
                           {info?.name ?? `code_${code}`}
                         </span>
-                        <span className={`font-mono text-[10px] ml-auto shrink-0 ${isCritical ? 'text-red-400' : 'text-yellow-500'}`}>
+                        <span className={`font-mono text-[10px] ml-auto shrink-0 ${isCritical ? 'text-[#e0533d]' : 'text-[#d9c964]'}`}>
                           +{score}pts
                         </span>
                       </div>
-                      <p className="font-mono text-[10px] text-gray-600 leading-5">{info?.description ?? '—'}</p>
-                      {info?.layer && <p className="font-mono text-[10px] text-gray-700 mt-0.5">{info.layer}</p>}
+                      <p className="font-mono text-[10px] text-[#9a91ad] leading-5">{info?.description ?? '—'}</p>
+                      {info?.layer && <p className="font-mono text-[10px] text-[#7c7291] mt-0.5">{info.layer}</p>}
                     </div>
                   );
                 })}
@@ -996,40 +1007,40 @@ function StepBreakdown({ calls }: { calls: Call[] }) {
   const maxAvg = Math.max(...rows.map(r => r.avg), 1);
 
   return (
-    <div className="bg-[#0a0a0a] border border-white/8 overflow-hidden">
-      <div className="px-5 py-3 border-b border-white/8">
-        <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest">Steps</p>
+    <div className="bg-[#281f38] border border-[#3a2f4e] overflow-hidden">
+      <div className="px-5 py-3 border-b border-[#3a2f4e]">
+        <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">Steps</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full font-mono text-[11px]">
           <thead>
-            <tr className="border-b border-white/8">
-              <th className="text-left px-5 py-2.5 text-gray-700 font-normal">step</th>
-              <th className="text-right px-4 py-2.5 text-gray-700 font-normal">calls</th>
-              <th className="px-4 py-2.5 text-gray-700 font-normal w-40">avg latency</th>
-              <th className="text-right px-4 py-2.5 text-gray-700 font-normal">p95</th>
-              <th className="text-right px-4 py-2.5 text-gray-700 font-normal">errors</th>
-              <th className="text-right px-5 py-2.5 text-gray-700 font-normal">avg cost</th>
+            <tr className="border-b border-[#3a2f4e]">
+              <th className="text-left px-5 py-2.5 text-[#7c7291] font-normal">step</th>
+              <th className="text-right px-4 py-2.5 text-[#7c7291] font-normal">calls</th>
+              <th className="px-4 py-2.5 text-[#7c7291] font-normal w-40">avg latency</th>
+              <th className="text-right px-4 py-2.5 text-[#7c7291] font-normal">p95</th>
+              <th className="text-right px-4 py-2.5 text-[#7c7291] font-normal">errors</th>
+              <th className="text-right px-5 py-2.5 text-[#7c7291] font-normal">avg cost</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-white/5">
+          <tbody className="divide-y divide-[#332946]">
             {rows.map(row => (
-              <tr key={row.name} className="hover:bg-white/2 transition-colors">
-                <td className="px-5 py-3 text-gray-300">{row.name}</td>
-                <td className="px-4 py-3 text-gray-600 text-right tabular-nums">{row.total}</td>
+              <tr key={row.name} className="hover:bg-[#2d2440] transition-colors">
+                <td className="px-5 py-3 text-[#c9c2d6]">{row.name}</td>
+                <td className="px-4 py-3 text-[#9a91ad] text-right tabular-nums">{row.total}</td>
                 <td className="px-4 py-3">
                   <div className="flex items-center gap-2">
-                    <div className="flex-1 h-px bg-white/8">
-                      <div className="h-full bg-violet-500/60" style={{ width: `${(row.avg / maxAvg) * 100}%` }} />
+                    <div className="flex-1 h-px bg-[#3a2f4e]">
+                      <div className="h-full bg-[#b794f4]/60" style={{ width: `${(row.avg / maxAvg) * 100}%` }} />
                     </div>
-                    <span className="text-gray-400 tabular-nums w-16 text-right shrink-0">{row.avg}ms</span>
+                    <span className="text-[#b3abc4] tabular-nums w-16 text-right shrink-0">{row.avg}ms</span>
                   </div>
                 </td>
-                <td className="px-4 py-3 text-gray-600 text-right tabular-nums">{row.p95}ms</td>
-                <td className={`px-4 py-3 text-right tabular-nums ${row.errors > 0 ? 'text-red-400' : 'text-gray-800'}`}>
+                <td className="px-4 py-3 text-[#9a91ad] text-right tabular-nums">{row.p95}ms</td>
+                <td className={`px-4 py-3 text-right tabular-nums ${row.errors > 0 ? 'text-[#e0533d]' : 'text-[#6b6180]'}`}>
                   {row.errors > 0 ? `${row.errorRate.toFixed(1)}%` : '—'}
                 </td>
-                <td className="px-5 py-3 text-gray-600 text-right tabular-nums">${row.avgCost.toFixed(5)}</td>
+                <td className="px-5 py-3 text-[#9a91ad] text-right tabular-nums">${row.avgCost.toFixed(5)}</td>
               </tr>
             ))}
           </tbody>
@@ -1044,14 +1055,14 @@ function StepBreakdown({ calls }: { calls: Call[] }) {
 function AnalysisPanel({ text, costUsd, onClose }: { text: string; costUsd: number; onClose: () => void }) {
   const lines = text.split('\n');
   return (
-    <div className="mb-6 bg-[#0a0a0a] border border-white/8 border-l-2 border-l-violet-600 px-5 py-4">
+    <div className="mb-6 bg-[#281f38] border border-[#3a2f4e] border-l-2 border-l-[#b794f4] px-5 py-4">
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-violet-500 text-sm">✦</span>
-          <span className="font-mono text-[10px] text-violet-500 uppercase tracking-widest">AI Analysis</span>
-          <span className="font-mono text-[10px] text-gray-700">claude-sonnet-4-6 · ${costUsd.toFixed(5)}</span>
+          <span className="text-[#b794f4] text-sm">✦</span>
+          <span className="font-mono text-[10px] text-[#b794f4] uppercase tracking-widest">AI Analysis</span>
+          <span className="font-mono text-[10px] text-[#7c7291]">claude-sonnet-4-6 · ${costUsd.toFixed(5)}</span>
         </div>
-        <button onClick={onClose} className="font-mono text-gray-600 hover:text-gray-300 text-sm leading-none">×</button>
+        <button onClick={onClose} className="font-mono text-[#9a91ad] hover:text-[#c9c2d6] text-sm leading-none">×</button>
       </div>
       <div className="space-y-1">
         {lines.map((line, i) => {
@@ -1059,8 +1070,8 @@ function AnalysisPanel({ text, costUsd, onClose }: { text: string; costUsd: numb
           const isBold = line.startsWith('**') && line.endsWith('**');
           const clean = isBold ? line.slice(2, -2) : line.replace(/\*\*(.*?)\*\*/g, '$1');
           return isBold
-            ? <p key={i} className="font-mono text-[10px] text-violet-400 uppercase tracking-widest mt-4 first:mt-0">{clean}</p>
-            : <p key={i} className={`font-mono text-[11px] leading-5 ${line.startsWith('- ') ? 'pl-3 text-gray-600' : 'text-gray-400'}`}>{clean}</p>;
+            ? <p key={i} className="font-mono text-[10px] text-[#c4a6f2] uppercase tracking-widest mt-4 first:mt-0">{clean}</p>
+            : <p key={i} className={`font-mono text-[11px] leading-5 ${line.startsWith('- ') ? 'pl-3 text-[#9a91ad]' : 'text-[#b3abc4]'}`}>{clean}</p>;
         })}
       </div>
     </div>
@@ -1108,70 +1119,70 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
             key={run.run_id}
             className={[
               'border-l-2',
-              run.is_critical ? 'border-red-600' : 'border-yellow-600',
+              run.is_critical ? 'border-[#e0533d]' : 'border-[#d9c964]',
             ].join(' ')}
           >
             <button
               onClick={() => setExpanded(isOpen ? null : run.run_id)}
-              className="w-full flex items-center justify-between gap-4 px-4 py-4 text-left bg-[#0a0a0a] hover:bg-white/4 transition-colors border border-l-0 border-white/8"
+              className="w-full flex items-center justify-between gap-4 px-4 py-4 text-left bg-[#281f38] hover:bg-[#2d2440] transition-colors border border-l-0 border-[#3a2f4e]"
             >
               <div className="flex items-center gap-3 min-w-0">
                 <Badge variant={run.is_critical ? 'critical' : 'warning'}>
                   {run.is_critical ? 'critical' : 'warning'}
                 </Badge>
-                <code className="font-mono text-xs text-gray-400 truncate">{run.run_id}</code>
+                <code className="font-mono text-xs text-[#b3abc4] truncate">{run.run_id}</code>
               </div>
               <div className="flex items-center gap-4 shrink-0">
-                <span className={`font-sans font-black text-sm tabular-nums ${run.is_critical ? 'text-red-400' : 'text-yellow-500'}`}>
+                <span className={`font-sans font-black text-sm tabular-nums ${run.is_critical ? 'text-[#e0533d]' : 'text-[#d9c964]'}`}>
                   {run.total_score} pts
                 </span>
-                <span className="font-mono text-[10px] text-gray-700">{new Date(run.latest_at).toLocaleString()}</span>
-                <span className="font-mono text-gray-700 text-xs">{isOpen ? '▲' : '▼'}</span>
+                <span className="font-mono text-[10px] text-[#7c7291]">{new Date(run.latest_at).toLocaleString()}</span>
+                <span className="font-mono text-[#7c7291] text-xs">{isOpen ? '▲' : '▼'}</span>
               </div>
             </button>
 
             {isOpen && (
-              <div className="bg-[#080808] border border-l-0 border-t-0 border-white/8 px-5 py-4 space-y-5">
+              <div className="bg-[#281f38] border border-l-0 border-t-0 border-[#3a2f4e] px-5 py-4 space-y-5">
                 {run.steps.map((step) => (
                   <div key={step.step_name}>
-                    <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-2">{step.step_name}</p>
+                    <p className="font-mono text-[10px] text-[#9a91ad] uppercase tracking-widest mb-2">{step.step_name}</p>
                     <div className="space-y-2">
                       {step.codes.map(({ code, score }) => {
                         const info = registry[String(code)];
                         const isCrit = score >= 50;
                         return (
-                          <div key={code} className={`border-l-2 pl-4 py-1.5 ${isCrit ? 'border-red-600' : 'border-yellow-600'}`}>
+                          <div key={code} className={`border-l-2 pl-4 py-1.5 ${isCrit ? 'border-[#e0533d]' : 'border-[#d9c964]'}`}>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-mono text-[10px] text-gray-700">{code}</span>
-                              <span className={`font-mono text-[11px] font-bold ${isCrit ? 'text-red-300' : 'text-yellow-300'}`}>
+                              <span className="font-mono text-[10px] text-[#7c7291]">{code}</span>
+                              <span className={`font-mono text-[11px] font-bold ${isCrit ? 'text-[#e0533d]' : 'text-[#e6d77f]'}`}>
                                 {info?.name ?? `code_${code}`}
                               </span>
-                              <span className={`font-mono text-[10px] ml-auto shrink-0 ${isCrit ? 'text-red-400' : 'text-yellow-500'}`}>
+                              <span className={`font-mono text-[10px] ml-auto shrink-0 ${isCrit ? 'text-[#e0533d]' : 'text-[#d9c964]'}`}>
                                 +{score}pts
                               </span>
-                              {info?.layer && <span className="font-mono text-[10px] text-gray-700">{info.layer}</span>}
+                              {info?.layer && <span className="font-mono text-[10px] text-[#7c7291]">{info.layer}</span>}
                             </div>
                             {info?.description && (
-                              <p className="font-mono text-[10px] text-gray-700 mt-0.5 leading-5">{info.description}</p>
+                              <p className="font-mono text-[10px] text-[#7c7291] mt-0.5 leading-5">{info.description}</p>
                             )}
                           </div>
                         );
                       })}
                     </div>
-                    <div className="text-right font-mono text-[10px] text-gray-700 mt-1">
+                    <div className="text-right font-mono text-[10px] text-[#7c7291] mt-1">
                       step total: {step.codes.reduce((s, c) => s + c.score, 0)} pts
                     </div>
                   </div>
                 ))}
 
-                <div className="flex items-center justify-between pt-3 border-t border-white/8">
-                  <span className="font-mono text-[10px] text-gray-700">
-                    threshold: {ANOMALY_THRESHOLD} pts — total: <span className={run.is_critical ? 'text-red-400 font-bold' : 'text-yellow-500'}>{run.total_score} pts</span>
+                <div className="flex items-center justify-between pt-3 border-t border-[#3a2f4e]">
+                  <span className="font-mono text-[10px] text-[#7c7291]">
+                    threshold: {ANOMALY_THRESHOLD} pts — total: <span className={run.is_critical ? 'text-[#e0533d] font-bold' : 'text-[#d9c964]'}>{run.total_score} pts</span>
                   </span>
                   <button
                     onClick={() => analyzeRun(run.run_id)}
                     disabled={analyzing}
-                    className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] border border-violet-700/60 text-violet-400 hover:bg-violet-900/20 hover:border-violet-500 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] border border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     {analyzing && analysis?.runId !== run.run_id ? <><span className="animate-spin text-[10px]">◌</span> analyzing…</> : <>✦ analyze</>}
                   </button>
@@ -1216,17 +1227,17 @@ function StepsHealthTab({ health }: { health: StepHealthRow[] }) {
     <div className="space-y-2 max-w-3xl">
 
       {/* L5 status banner */}
-      <div className="bg-[#0a0a0a] border border-white/8 px-5 py-3 flex items-center justify-between gap-4 mb-4">
+      <div className="bg-[#281f38] border border-[#3a2f4e] px-5 py-3 flex items-center justify-between gap-4 mb-4">
         <div className="font-mono text-[11px]">
-          <span className="text-white font-bold">L5 statistical detection</span>
-          <span className="text-gray-700 mx-2">·</span>
+          <span className="text-[#e9e4f0] font-bold">L5 statistical detection</span>
+          <span className="text-[#7c7291] mx-2">·</span>
           {activeCount > 0
-            ? <span className="text-green-500">{activeCount} step{activeCount !== 1 ? 's' : ''} active</span>
-            : <span className="text-gray-700">no steps active yet</span>
+            ? <span className="text-[#7fb59a]">{activeCount} step{activeCount !== 1 ? 's' : ''} active</span>
+            : <span className="text-[#7c7291]">no steps active yet</span>
           }
-          {warmingCount > 0 && <span className="text-gray-700 ml-2">· {warmingCount} warming</span>}
+          {warmingCount > 0 && <span className="text-[#7c7291] ml-2">· {warmingCount} warming</span>}
         </div>
-        <span className="font-mono text-[10px] text-gray-700 shrink-0">{L5_MIN_SAMPLES} calls/step to activate</span>
+        <span className="font-mono text-[10px] text-[#7c7291] shrink-0">{L5_MIN_SAMPLES} calls/step to activate</span>
       </div>
 
       {sorted.map(row => {
@@ -1234,28 +1245,28 @@ function StepsHealthTab({ health }: { health: StepHealthRow[] }) {
         const isCritical = row.status === 'critical';
         const pct = Math.min((row.sample_count / L5_MIN_SAMPLES) * 100, 100);
 
-        const accentBorder = isCritical ? 'border-red-600'
-          : row.status === 'degrading' ? 'border-yellow-600'
-          : isWarming ? 'border-white/10'
-          : 'border-green-600';
+        const accentBorder = isCritical ? 'border-[#e0533d]'
+          : row.status === 'degrading' ? 'border-[#d9c964]'
+          : isWarming ? 'border-[#3a2f4e]'
+          : 'border-[#7fb59a]';
 
         return (
-          <div key={row.step_profile_id} className={`bg-[#0a0a0a] border border-white/8 border-l-2 ${accentBorder} px-5 py-4`}>
+          <div key={row.step_profile_id} className={`bg-[#281f38] border border-[#3a2f4e] border-l-2 ${accentBorder} px-5 py-4`}>
             <div className="flex items-center justify-between gap-4">
               <div className="flex items-center gap-3 min-w-0">
                 <span className={[
                   'w-1.5 h-1.5 rounded-full shrink-0',
-                  isCritical  ? 'bg-red-500'
-                    : row.status === 'degrading' ? 'bg-yellow-500'
-                    : isWarming ? 'bg-gray-700'
-                    : 'bg-green-500',
+                  isCritical  ? 'bg-[#e0533d]'
+                    : row.status === 'degrading' ? 'bg-[#d9a441]'
+                    : isWarming ? 'bg-[#332946]'
+                    : 'bg-[#7fb59a]',
                 ].join(' ')} />
-                <span className={`font-mono text-sm ${isWarming ? 'text-gray-600' : 'text-gray-300'}`}>
+                <span className={`font-mono text-sm ${isWarming ? 'text-[#9a91ad]' : 'text-[#c9c2d6]'}`}>
                   {row.step_name}
                 </span>
               </div>
               <div className="flex items-center gap-3 shrink-0">
-                <span className="font-mono text-[10px] text-gray-700">{row.sample_count} calls</span>
+                <span className="font-mono text-[10px] text-[#7c7291]">{row.sample_count} calls</span>
                 <Badge variant={isCritical ? 'critical' : row.status === 'degrading' ? 'warning' : row.status === 'warming' ? 'neutral' : 'ok'}>
                   {row.status}
                 </Badge>
@@ -1264,25 +1275,25 @@ function StepsHealthTab({ health }: { health: StepHealthRow[] }) {
 
             {isWarming && (
               <div className="mt-3">
-                <div className="flex justify-between font-mono text-[10px] text-gray-700 mb-1.5">
+                <div className="flex justify-between font-mono text-[10px] text-[#7c7291] mb-1.5">
                   <span>{row.sample_count} / {L5_MIN_SAMPLES} calls to activate L5</span>
                   <span>{Math.round(pct)}%</span>
                 </div>
-                <div className="h-px bg-white/8">
-                  <div className="h-full bg-violet-500/50 transition-all" style={{ width: `${pct}%` }} />
+                <div className="h-px bg-[#3a2f4e]">
+                  <div className="h-full bg-[#b794f4]/50 transition-all" style={{ width: `${pct}%` }} />
                 </div>
               </div>
             )}
 
             {row.trends.length > 0 && (
-              <div className="mt-3 space-y-2 border-t border-white/8 pt-3">
+              <div className="mt-3 space-y-2 border-t border-[#3a2f4e] pt-3">
                 {row.trends.map(t => (
                   <div key={t.metric} className="flex items-center gap-3 font-mono text-[11px]">
-                    <span className="text-gray-700 w-16 shrink-0">{metricLabel(t.metric)}</span>
-                    <span className="text-gray-700">baseline <span className="text-gray-400">{fmtMetric(t.metric, t.baseline_mean)}</span></span>
-                    <span className={t.direction === 'up' ? 'text-red-400' : 'text-blue-400'}>{t.direction === 'up' ? '↑' : '↓'}</span>
-                    <span className="text-gray-700">recent <span className={isCritical ? 'text-red-300' : 'text-yellow-300'}>{fmtMetric(t.metric, t.recent_mean)}</span></span>
-                    <span className={['ml-auto shrink-0 font-bold', Math.abs(t.sigma) >= 2.5 ? 'text-red-400' : 'text-yellow-500'].join(' ')}>
+                    <span className="text-[#7c7291] w-16 shrink-0">{metricLabel(t.metric)}</span>
+                    <span className="text-[#7c7291]">baseline <span className="text-[#b3abc4]">{fmtMetric(t.metric, t.baseline_mean)}</span></span>
+                    <span className={t.direction === 'up' ? 'text-[#e0533d]' : 'text-[#7fb59a]'}>{t.direction === 'up' ? '↑' : '↓'}</span>
+                    <span className="text-[#7c7291]">recent <span className={isCritical ? 'text-[#e0533d]' : 'text-[#e6d77f]'}>{fmtMetric(t.metric, t.recent_mean)}</span></span>
+                    <span className={['ml-auto shrink-0 font-bold', Math.abs(t.sigma) >= 2.5 ? 'text-[#e0533d]' : 'text-[#d9c964]'].join(' ')}>
                       {t.sigma > 0 ? '+' : ''}{t.sigma}×IQR
                     </span>
                   </div>
@@ -1340,47 +1351,98 @@ function ContractsTab({ contracts, apiKey, onUpdate }: {
 
   return (
     <div>
-      <p className="font-mono text-[11px] text-gray-600 leading-6 mb-5 max-w-2xl">
-        Contracts are learned from each step&apos;s own output history. A <span className="text-yellow-400">proposed</span> contract is checked and logged but does not affect scores until you confirm it — then hard violations fold into the anomaly score. Rejecting one retires it.
+      <p className="font-mono text-[11px] text-[#9a91ad] leading-6 mb-5 max-w-2xl">
+        Contracts are learned from each step&apos;s own output history. A <span className="text-[#d9c964]">proposed</span> contract is checked and logged but does not affect scores until you confirm it — then hard violations fold into the anomaly score. Rejecting one retires it.
       </p>
-      {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
-      <div className="space-y-px bg-white/8 border border-white/8">
+      {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-[#7fb59a]' : 'text-[#e0533d]'].join(' ')}>{msg.text}</p>}
+      <div className="space-y-px bg-[#3a2f4e] border border-[#3a2f4e]">
         {sorted.map((c) => (
-          <div key={c.step_profile_id} className="bg-[#0a0a0a] p-4">
+          <div key={c.step_profile_id} className="bg-[#281f38] p-4">
             <div className="flex items-start justify-between gap-4 mb-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-xs text-white font-bold truncate">{c.step_name ?? 'unnamed step'}</span>
+                  <span className="font-mono text-xs text-[#e9e4f0] font-bold truncate">{c.step_name ?? 'unnamed step'}</span>
                   {badgeFor(c.status)}
                 </div>
-                <p className="font-mono text-[10px] text-gray-700">learned from {c.sample_count ?? '—'} outputs · format {c.format ?? 'text'}</p>
+                <p className="font-mono text-[10px] text-[#7c7291]">
+                  learned from {c.sample_count ?? '—'} outputs · format {c.format ?? 'text'}
+                  {c.format === 'json' && c.json_rate != null && ` · parses as JSON ${Math.round(c.json_rate * 100)}%`}
+                </p>
               </div>
               {c.status === 'proposed' && (
                 <div className="flex gap-2 shrink-0">
                   <button
                     onClick={() => verdict(c.step_profile_id, 'confirm')}
                     disabled={busy === c.step_profile_id}
-                    className="px-3 py-1.5 font-mono text-[11px] border border-green-700/60 text-green-400 hover:bg-green-900/20 hover:border-green-500 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 font-mono text-[11px] border border-[#7fb59a]/60 text-[#7fb59a] hover:bg-[#7fb59a]/15 hover:border-[#7fb59a] disabled:opacity-40 transition-colors"
                   >
                     {busy === c.step_profile_id ? '…' : '✓ confirm'}
                   </button>
                   <button
                     onClick={() => verdict(c.step_profile_id, 'reject')}
                     disabled={busy === c.step_profile_id}
-                    className="px-3 py-1.5 font-mono text-[11px] border border-red-700/60 text-red-400 hover:bg-red-900/20 hover:border-red-500 disabled:opacity-40 transition-colors"
+                    className="px-3 py-1.5 font-mono text-[11px] border border-[#e0533d]/60 text-[#e0533d] hover:bg-[#e0533d]/15 hover:border-[#e0533d] disabled:opacity-40 transition-colors"
                   >
                     ✕ reject
                   </button>
                 </div>
               )}
             </div>
-            {c.required_keys.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {c.required_keys.map((k) => (
-                  <span key={k} className="font-mono text-[10px] text-violet-300 bg-violet-900/30 px-1.5 py-0.5">{k}</span>
-                ))}
-              </div>
-            )}
+            {(() => {
+              const specs = c.keys ? Object.values(c.keys) : [];
+              if (specs.length > 0) {
+                const sorted = [...specs].sort((a, b) => {
+                  const ar = c.required_keys.includes(a.name), br = c.required_keys.includes(b.name);
+                  if (ar !== br) return ar ? -1 : 1;          // required keys first
+                  return b.presence - a.presence;
+                });
+                const constraint = (k: KeySpec) =>
+                  k.enum_values && k.enum_values.length ? `∈ ${k.enum_values.join(' · ')}`
+                  : (k.num_min != null || k.num_max != null) ? `${k.num_min ?? '−∞'} – ${k.num_max ?? '∞'}`
+                  : '—';
+                return (
+                  <div className="border border-[#3a2f4e] overflow-x-auto">
+                    <table className="w-full font-mono text-[10px]">
+                      <thead>
+                        <tr className="border-b border-[#3a2f4e] text-[#7c7291] text-left uppercase tracking-wider">
+                          <th className="px-3 py-1.5 font-normal">key</th>
+                          <th className="px-3 py-1.5 font-normal">type</th>
+                          <th className="px-3 py-1.5 font-normal">required</th>
+                          <th className="px-3 py-1.5 font-normal">constraints</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sorted.map((k) => {
+                          const required = c.required_keys.includes(k.name);
+                          return (
+                            <tr key={k.name} className="border-b border-[#3a2f4e]/50 last:border-0">
+                              <td className="px-3 py-1.5 text-[#cdb9f7]">{k.name}</td>
+                              <td className="px-3 py-1.5 text-[#b3abc4]">{k.types.join(' | ') || '—'}</td>
+                              <td className="px-3 py-1.5">
+                                {required
+                                  ? <span className="text-[#7fb59a]">required</span>
+                                  : <span className="text-[#9a91ad]">{Math.round(k.presence * 100)}%</span>}
+                              </td>
+                              <td className="px-3 py-1.5 text-[#9a91ad]">{constraint(k)}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              }
+              if (c.required_keys.length > 0) {
+                return (
+                  <div className="flex flex-wrap gap-1.5">
+                    {c.required_keys.map((k) => (
+                      <span key={k} className="font-mono text-[10px] text-[#cdb9f7] bg-[#b794f4]/18 px-1.5 py-0.5">{k}</span>
+                    ))}
+                  </div>
+                );
+              }
+              return <p className="font-mono text-[10px] text-[#7c7291]">Free-form text output — no structural keys.</p>;
+            })()}
           </div>
         ))}
       </div>
@@ -1406,72 +1468,72 @@ function UsageTab({ project }: { project: Project }) {
       .catch(() => {});
   }, [project.id, BACKEND_URL]);
 
-  if (!data) return <div className="font-mono text-xs text-gray-700 py-8">loading…</div>;
+  if (!data) return <div className="font-mono text-xs text-[#7c7291] py-8">loading…</div>;
 
   const budgetPct = data.budget_pct ?? 0;
   const overBudget = data.budget_usd != null && data.month_cost_usd >= data.budget_usd;
 
   return (
     <div className="space-y-6 max-w-2xl">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-white/8">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-[#3a2f4e]">
         <StatCard label="This month" value={`$${data.month_cost_usd.toFixed(4)}`} mono />
         <StatCard label="All time"   value={`$${data.total_cost_usd.toFixed(4)}`} mono />
-        <div className="border border-white/8 px-4 py-4">
+        <div className="border border-[#3a2f4e] px-4 py-4">
           {data.budget_usd != null ? (
             <>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">Budget</p>
-              <p className={`font-sans font-black text-xl tabular-nums ${overBudget ? 'text-red-400' : 'text-white'}`}>
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">Budget</p>
+              <p className={`font-sans font-black text-xl tabular-nums ${overBudget ? 'text-[#e0533d]' : 'text-[#e9e4f0]'}`}>
                 {budgetPct.toFixed(1)}%
               </p>
-              <p className="font-mono text-[10px] text-gray-700 mt-1">of ${data.budget_usd.toFixed(2)}/mo</p>
-              <div className="mt-3 h-px bg-white/8">
+              <p className="font-mono text-[10px] text-[#7c7291] mt-1">of ${data.budget_usd.toFixed(2)}/mo</p>
+              <div className="mt-3 h-px bg-[#3a2f4e]">
                 <div
-                  className={`h-full transition-all ${overBudget ? 'bg-red-500' : budgetPct > 80 ? 'bg-yellow-500' : 'bg-emerald-500'}`}
+                  className={`h-full transition-all ${overBudget ? 'bg-[#e0533d]' : budgetPct > 80 ? 'bg-[#d9a441]' : 'bg-[#7fb59a]'}`}
                   style={{ width: `${Math.min(budgetPct, 100)}%` }}
                 />
               </div>
             </>
           ) : (
             <>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-2">Budget</p>
-              <p className="font-sans font-black text-xl text-gray-800">—</p>
-              <p className="font-mono text-[10px] text-gray-700 mt-1">not set</p>
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">Budget</p>
+              <p className="font-sans font-black text-xl text-[#6b6180]">—</p>
+              <p className="font-mono text-[10px] text-[#7c7291] mt-1">not set</p>
             </>
           )}
         </div>
       </div>
 
       {Object.keys(data.by_feature).length > 0 && (
-        <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">
+        <div className="bg-[#281f38] border border-[#3a2f4e] divide-y divide-[#3a2f4e]">
           <div className="px-4 py-3">
-            <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest">This month by feature</p>
+            <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">This month by feature</p>
           </div>
           {Object.entries(data.by_feature).map(([feature, cost]) => (
             <div key={feature} className="flex items-center justify-between px-4 py-3">
-              <span className="font-mono text-[11px] text-gray-500">{feature}</span>
-              <span className="font-mono text-[11px] text-gray-300">${cost.toFixed(4)}</span>
+              <span className="font-mono text-[11px] text-[#9a91ad]">{feature}</span>
+              <span className="font-mono text-[11px] text-[#c9c2d6]">${cost.toFixed(4)}</span>
             </div>
           ))}
         </div>
       )}
 
       {data.recent.length > 0 ? (
-        <div className="border border-white/8">
-          <div className="px-4 py-3 border-b border-white/8">
-            <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest">Recent usage</p>
+        <div className="border border-[#3a2f4e]">
+          <div className="px-4 py-3 border-b border-[#3a2f4e]">
+            <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">Recent usage</p>
           </div>
-          <div className="divide-y divide-white/8">
+          <div className="divide-y divide-[#3a2f4e]">
             {data.recent.map(r => (
               <div key={r.id} className="px-4 py-3 flex items-center justify-between">
                 <div className="min-w-0">
-                  <span className="font-mono text-[11px] text-gray-400">{r.feature}</span>
-                  <span className="font-mono text-[10px] text-gray-700 mx-2">·</span>
-                  <span className="font-mono text-[10px] text-gray-700">{r.model}</span>
-                  <div className="font-mono text-[10px] text-gray-700 mt-0.5">{r.input_tokens + r.output_tokens} tokens · run {r.run_id.slice(0, 8)}…</div>
+                  <span className="font-mono text-[11px] text-[#b3abc4]">{r.feature}</span>
+                  <span className="font-mono text-[10px] text-[#7c7291] mx-2">·</span>
+                  <span className="font-mono text-[10px] text-[#7c7291]">{r.model}</span>
+                  <div className="font-mono text-[10px] text-[#7c7291] mt-0.5">{r.input_tokens + r.output_tokens} tokens · run {r.run_id.slice(0, 8)}…</div>
                 </div>
                 <div className="text-right shrink-0 ml-4">
-                  <div className="font-mono text-[11px] text-gray-300">${r.cost_usd.toFixed(6)}</div>
-                  <div className="font-mono text-[10px] text-gray-700">{new Date(r.created_at).toLocaleDateString()}</div>
+                  <div className="font-mono text-[11px] text-[#c9c2d6]">${r.cost_usd.toFixed(6)}</div>
+                  <div className="font-mono text-[10px] text-[#7c7291]">{new Date(r.created_at).toLocaleDateString()}</div>
                 </div>
               </div>
             ))}
@@ -1500,9 +1562,9 @@ interface ThresholdData {
 
 function SettingSection({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
   return (
-    <div className="pt-8 border-t border-white/8 first:border-t-0 first:pt-0">
-      <h2 className="font-sans font-bold text-sm uppercase tracking-widest text-white mb-1">{title}</h2>
-      {description && <p className="font-mono text-[11px] text-gray-600 mb-5 leading-5">{description}</p>}
+    <div className="pt-8 border-t border-[#3a2f4e] first:border-t-0 first:pt-0">
+      <h2 className="font-sans font-bold text-sm uppercase tracking-widest text-[#e9e4f0] mb-1">{title}</h2>
+      {description && <p className="font-mono text-[11px] text-[#9a91ad] mb-5 leading-5">{description}</p>}
       {children}
     </div>
   );
@@ -1511,13 +1573,13 @@ function SettingSection({ title, description, children }: { title: string; descr
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <label className="block font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-1.5">{label}</label>
+      <label className="block font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-1.5">{label}</label>
       {children}
     </div>
   );
 }
 
-const inputCls = 'bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20 w-full';
+const inputCls = 'bg-[#201a2b] border border-[#3a2f4e] px-3 py-2 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63] w-full';
 
 function ImportSection({ project }: { project: Project }) {
   const [provider, setProvider]   = useState<'langfuse' | 'langsmith'>('langfuse');
@@ -1608,11 +1670,11 @@ function ImportSection({ project }: { project: Project }) {
           </>
         )}
 
-        {msg && <p className={['font-mono text-xs', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
+        {msg && <p className={['font-mono text-xs', msg.ok ? 'text-[#7fb59a]' : 'text-[#e0533d]'].join(' ')}>{msg.text}</p>}
         <button
           onClick={runImport}
           disabled={importing || !canImport}
-          className="font-mono text-xs font-bold px-5 py-2.5 border border-violet-700/60 text-violet-400 hover:bg-violet-900/20 hover:border-violet-500 disabled:opacity-40 transition-colors"
+          className="font-mono text-xs font-bold px-5 py-2.5 border border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4] disabled:opacity-40 transition-colors"
         >
           {importing ? 'starting…' : `import from ${provider}`}
         </button>
@@ -1751,7 +1813,7 @@ function SettingsTab({ project }: { project: Project }) {
               />
               <button
                 onClick={testWebhook} disabled={testing || !url.trim()}
-                className="px-4 py-2 font-mono text-xs border border-white/8 text-gray-400 hover:bg-white/4 disabled:opacity-40 transition-colors shrink-0"
+                className="px-4 py-2 font-mono text-xs border border-[#3a2f4e] text-[#b3abc4] hover:bg-[#2d2440] disabled:opacity-40 transition-colors shrink-0"
               >
                 {testing ? 'sending…' : 'test'}
               </button>
@@ -1760,8 +1822,8 @@ function SettingsTab({ project }: { project: Project }) {
 
           <div className="flex items-center justify-between">
             <div>
-              <p className="font-mono text-xs text-gray-300">Alert on every error call</p>
-              <p className="font-mono text-[10px] text-gray-700 mt-0.5">Fires immediately whenever a call returns an error</p>
+              <p className="font-mono text-xs text-[#c9c2d6]">Alert on every error call</p>
+              <p className="font-mono text-[10px] text-[#7c7291] mt-0.5">Fires immediately whenever a call returns an error</p>
             </div>
             <Toggle checked={alertOnError} onChange={setAlertOnError} />
           </div>
@@ -1772,9 +1834,9 @@ function SettingsTab({ project }: { project: Project }) {
                 <input
                   type="number" min={1} max={100} value={rateThreshold}
                   onChange={e => setRateThreshold(Number(e.target.value))}
-                  className="w-20 bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 focus:outline-none focus:border-white/20 text-center"
+                  className="w-20 bg-[#201a2b] border border-[#3a2f4e] px-3 py-2 font-mono text-xs text-[#c9c2d6] focus:outline-none focus:border-[#4a3d63] text-center"
                 />
-                <span className="font-mono text-xs text-gray-700">%</span>
+                <span className="font-mono text-xs text-[#7c7291]">%</span>
               </div>
             </Field>
             <Field label="Over last">
@@ -1782,16 +1844,16 @@ function SettingsTab({ project }: { project: Project }) {
                 <input
                   type="number" min={5} max={100} value={rateWindow}
                   onChange={e => setRateWindow(Number(e.target.value))}
-                  className="w-20 bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 focus:outline-none focus:border-white/20 text-center"
+                  className="w-20 bg-[#201a2b] border border-[#3a2f4e] px-3 py-2 font-mono text-xs text-[#c9c2d6] focus:outline-none focus:border-[#4a3d63] text-center"
                 />
-                <span className="font-mono text-xs text-gray-700">calls</span>
+                <span className="font-mono text-xs text-[#7c7291]">calls</span>
               </div>
             </Field>
           </div>
 
           <Field label="Anomaly alerts">
             <SegmentedControl options={alertLevelOptions} value={slackAnomalyLevel} onChange={setSlackAnomalyLevel} />
-            <p className="font-mono text-[10px] text-gray-700 mt-2">
+            <p className="font-mono text-[10px] text-[#7c7291] mt-2">
               {slackAnomalyLevel === 'critical' && 'Alerts when anomaly score reaches ≥ 100pts.'}
               {slackAnomalyLevel === 'warning'  && 'Alerts on any anomaly hit, even below threshold.'}
               {slackAnomalyLevel === 'none'      && 'No anomaly alerts sent to Slack.'}
@@ -1811,11 +1873,11 @@ function SettingsTab({ project }: { project: Project }) {
               placeholder="https://…@o….ingest.sentry.io/…"
               className={inputCls}
             />
-            <p className="font-mono text-[10px] text-gray-700 mt-1.5">Settings → Client Keys (DSN) in your Sentry project.</p>
+            <p className="font-mono text-[10px] text-[#7c7291] mt-1.5">Settings → Client Keys (DSN) in your Sentry project.</p>
           </Field>
           <Field label="Forward to Sentry when">
             <SegmentedControl options={alertLevelOptions} value={sentryLevel} onChange={setSentryLevel} />
-            <p className="font-mono text-[10px] text-gray-700 mt-2">
+            <p className="font-mono text-[10px] text-[#7c7291] mt-2">
               {sentryLevel === 'critical' && 'Sends to Sentry when run score crosses the threshold (≥ 100pts).'}
               {sentryLevel === 'warning'  && 'Sends to Sentry for any anomaly hit, even below threshold.'}
               {sentryLevel === 'none'      && 'Sentry DSN saved but no events will be forwarded.'}
@@ -1838,16 +1900,16 @@ function SettingsTab({ project }: { project: Project }) {
               />
               <button
                 onClick={testOutbound} disabled={testingOut || !webhookUrl.trim()}
-                className="px-4 py-2 font-mono text-xs border border-white/8 text-gray-400 hover:bg-white/4 disabled:opacity-40 transition-colors shrink-0"
+                className="px-4 py-2 font-mono text-xs border border-[#3a2f4e] text-[#b3abc4] hover:bg-[#2d2440] disabled:opacity-40 transition-colors shrink-0"
               >
                 {testingOut ? 'sending…' : 'test'}
               </button>
             </div>
-            <p className="font-mono text-[10px] text-gray-700 mt-1.5">Save first, then test — the test reads the saved URL.</p>
+            <p className="font-mono text-[10px] text-[#7c7291] mt-1.5">Save first, then test — the test reads the saved URL.</p>
           </Field>
           <Field label="Deliver when">
             <SegmentedControl options={alertLevelOptions} value={webhookLevel} onChange={setWebhookLevel} />
-            <p className="font-mono text-[10px] text-gray-700 mt-2">
+            <p className="font-mono text-[10px] text-[#7c7291] mt-2">
               {webhookLevel === 'critical' && 'Delivers when run score crosses the threshold (≥ 100pts).'}
               {webhookLevel === 'warning'  && 'Delivers on any anomaly hit, even below threshold.'}
               {webhookLevel === 'none'      && 'Webhook saved but nothing is delivered.'}
@@ -1855,8 +1917,8 @@ function SettingsTab({ project }: { project: Project }) {
           </Field>
           {webhookSecret && (
             <Field label="Signing secret">
-              <code className="block bg-black border border-white/8 px-3 py-2 font-mono text-[11px] text-gray-400 break-all">{webhookSecret}</code>
-              <p className="font-mono text-[10px] text-gray-700 mt-1.5">Verify the <span className="text-gray-500">X-Cernova-Signature</span> header: <span className="text-gray-500">sha256=HMAC_SHA256(secret, raw_body)</span>.</p>
+              <code className="block bg-[#201a2b] border border-[#3a2f4e] px-3 py-2 font-mono text-[11px] text-[#b3abc4] break-all">{webhookSecret}</code>
+              <p className="font-mono text-[10px] text-[#7c7291] mt-1.5">Verify the <span className="text-[#9a91ad]">X-Cernova-Signature</span> header: <span className="text-[#9a91ad]">sha256=HMAC_SHA256(secret, raw_body)</span>.</p>
             </Field>
           )}
         </div>
@@ -1877,7 +1939,7 @@ function SettingsTab({ project }: { project: Project }) {
           {thresholdMode === 'dynamic' ? (
             baseline ? (
               <div className="space-y-2">
-                <p className="font-mono text-[10px] text-gray-700">
+                <p className="font-mono text-[10px] text-[#7c7291]">
                   {baseline.mode === 'dynamic'
                     ? `Learned from ${baseline.calls_used} calls (p95). Updates automatically.`
                     : `Static defaults active — ${baseline.calls_needed} more calls needed to adapt.`}
@@ -1887,30 +1949,30 @@ function SettingsTab({ project }: { project: Project }) {
                   { label: 'Tokens',  value: baseline.thresholds.total_tokens_max != null ? baseline.thresholds.total_tokens_max.toLocaleString() : '—', sub: baseline.baselines?.total_tokens?.p50 != null ? `p50 ${Math.round(baseline.baselines.total_tokens.p50).toLocaleString()}` : null },
                   { label: 'Cost',    value: baseline.thresholds.cost_max != null ? `$${baseline.thresholds.cost_max.toFixed(4)}` : '—', sub: baseline.baselines?.cost?.p50 != null ? `p50 $${baseline.baselines.cost.p50.toFixed(4)}` : null },
                 ].map(({ label, value, sub }) => (
-                  <div key={label} className="flex items-center justify-between border-b border-white/5 py-2 last:border-b-0">
-                    <span className="font-mono text-[11px] text-gray-600">{label}</span>
+                  <div key={label} className="flex items-center justify-between border-b border-[#332946] py-2 last:border-b-0">
+                    <span className="font-mono text-[11px] text-[#9a91ad]">{label}</span>
                     <div className="text-right">
-                      <span className="font-mono text-[11px] text-gray-300">{value}</span>
-                      {sub && <div className="font-mono text-[10px] text-gray-700">{sub}</div>}
+                      <span className="font-mono text-[11px] text-[#c9c2d6]">{value}</span>
+                      {sub && <div className="font-mono text-[10px] text-[#7c7291]">{sub}</div>}
                     </div>
                   </div>
                 ))}
               </div>
-            ) : <p className="font-mono text-[10px] text-gray-700">loading baseline…</p>
+            ) : <p className="font-mono text-[10px] text-[#7c7291]">loading baseline…</p>
           ) : (
             <div className="space-y-3">
-              <p className="font-mono text-[10px] text-gray-700">Override limits — leave blank to keep the static default.</p>
+              <p className="font-mono text-[10px] text-[#7c7291]">Override limits — leave blank to keep the static default.</p>
               {[
                 { label: 'Max latency (ms)', placeholder: '10000', value: manualLatency, onChange: setManualLatency },
                 { label: 'Max total tokens', placeholder: '50000', value: manualTokens, onChange: setManualTokens },
                 { label: 'Max cost (USD)',   placeholder: '1.00',  value: manualCost,   onChange: setManualCost },
               ].map(({ label, placeholder, value, onChange }) => (
                 <div key={label} className="flex items-center justify-between gap-4">
-                  <label className="font-mono text-[11px] text-gray-600 shrink-0">{label}</label>
+                  <label className="font-mono text-[11px] text-[#9a91ad] shrink-0">{label}</label>
                   <input
                     type="number" min="0" step="any" placeholder={placeholder} value={value}
                     onChange={e => onChange(e.target.value)}
-                    className="w-36 bg-black border border-white/8 px-3 py-1.5 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20"
+                    className="w-36 bg-[#201a2b] border border-[#3a2f4e] px-3 py-1.5 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63]"
                   />
                 </div>
               ))}
@@ -1924,28 +1986,28 @@ function SettingsTab({ project }: { project: Project }) {
         description="Get a Slack alert when AI analysis spend crosses this amount in the current calendar month."
       >
         <div className="flex items-center gap-3">
-          <span className="font-mono text-xs text-gray-700">$</span>
+          <span className="font-mono text-xs text-[#7c7291]">$</span>
           <input
             type="number" min="0" step="0.01" placeholder="e.g. 10.00" value={budget}
             onChange={e => setBudget(e.target.value)}
-            className="w-36 bg-black border border-white/8 px-3 py-2 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20"
+            className="w-36 bg-[#201a2b] border border-[#3a2f4e] px-3 py-2 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63]"
           />
-          <span className="font-mono text-[10px] text-gray-700">USD / month — leave blank to disable</span>
+          <span className="font-mono text-[10px] text-[#7c7291]">USD / month — leave blank to disable</span>
         </div>
       </SettingSection>
       </>}
 
       {group === 'project' && (
       <SettingSection title="Project details">
-        <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">
+        <div className="bg-[#281f38] border border-[#3a2f4e] divide-y divide-[#3a2f4e]">
           {[
             { label: 'Project ID', value: project.id, mono: true },
             { label: 'API key',    value: `${project.API_KEY.slice(0, 12)}…`, mono: true },
             { label: 'Created',   value: new Date(project.created_at).toLocaleDateString() },
           ].map(({ label, value }) => (
             <div key={label} className="flex items-center justify-between px-4 py-3">
-              <span className="font-mono text-[11px] text-gray-700">{label}</span>
-              <span className="font-mono text-[11px] text-gray-400">{value}</span>
+              <span className="font-mono text-[11px] text-[#7c7291]">{label}</span>
+              <span className="font-mono text-[11px] text-[#b3abc4]">{value}</span>
             </div>
           ))}
         </div>
@@ -1955,11 +2017,11 @@ function SettingsTab({ project }: { project: Project }) {
       </div>
 
       {(group === 'alerts' || group === 'detection') && (
-      <div className="pt-8 border-t border-white/8">
-        {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-green-500' : 'text-red-400'].join(' ')}>{msg.text}</p>}
+      <div className="pt-8 border-t border-[#3a2f4e]">
+        {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-[#7fb59a]' : 'text-[#e0533d]'].join(' ')}>{msg.text}</p>}
         <button
           onClick={save} disabled={saving}
-          className="font-mono text-xs font-bold px-5 py-2.5 bg-white text-black hover:bg-gray-100 disabled:opacity-50 transition-colors"
+          className="font-mono text-xs font-bold px-5 py-2.5 bg-[#b794f4] text-[#201a2b] hover:bg-[#c9b0f8] disabled:opacity-50 transition-colors"
         >
           {saving ? 'saving…' : 'save settings'}
         </button>

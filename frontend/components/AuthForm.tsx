@@ -18,7 +18,7 @@ function extractMessage(err: unknown): string {
   return 'Something went wrong';
 }
 
-const inputCls = 'w-full bg-black border border-white/8 px-3 py-2.5 font-mono text-xs text-gray-300 placeholder-gray-700 focus:outline-none focus:border-white/20';
+const inputCls = 'w-full bg-[#201a2b] border border-[#3a2f4e] px-3 py-2.5 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63]';
 
 export default function AuthForm() {
   const router = useRouter();
@@ -60,25 +60,25 @@ export default function AuthForm() {
 
   if (mode === 'forgot') {
     return (
-      <div className="bg-[#0a0a0a] border border-white/8 p-8">
-        <h2 className="font-sans font-black text-sm text-white mb-1">Reset password</h2>
-        <p className="font-mono text-[11px] text-gray-600 mb-6">
+      <div className="bg-[#281f38] border border-[#3a2f4e] p-8">
+        <h2 className="font-sans font-black text-sm text-[#e9e4f0] mb-1">Reset password</h2>
+        <p className="font-mono text-[11px] text-[#9a91ad] mb-6">
           Enter your email and we&apos;ll send a reset link.
         </p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-1.5">Email</label>
+            <label className="block font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-1.5">Email</label>
             <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className={inputCls} />
           </div>
-          {error && <p className="font-mono text-[11px] text-red-400">{error}</p>}
-          {info  && <p className="font-mono text-[11px] text-green-500">{info}</p>}
-          <button type="submit" disabled={loading} className="w-full bg-white text-black py-2.5 font-mono text-xs font-bold hover:bg-gray-100 disabled:opacity-50 transition-colors">
+          {error && <p className="font-mono text-[11px] text-[#e0533d]">{error}</p>}
+          {info  && <p className="font-mono text-[11px] text-[#7fb59a]">{info}</p>}
+          <button type="submit" disabled={loading} className="w-full bg-[#b794f4] text-[#201a2b] py-2.5 font-mono text-xs font-bold hover:bg-[#c9b0f8] disabled:opacity-50 transition-colors">
             {loading ? 'sending…' : 'send reset link'}
           </button>
         </form>
         <button
           onClick={() => { setMode('signin'); setError(null); setInfo(null); }}
-          className="mt-5 font-mono text-[11px] text-gray-700 hover:text-white transition-colors"
+          className="mt-5 font-mono text-[11px] text-[#7c7291] hover:text-[#e9e4f0] transition-colors"
         >
           ← back to sign in
         </button>
@@ -87,17 +87,17 @@ export default function AuthForm() {
   }
 
   return (
-    <div className="bg-[#0a0a0a] border border-white/8">
+    <div className="bg-[#281f38] border border-[#3a2f4e]">
       {/* Tab switcher */}
-      <div className="flex border-b border-white/8">
+      <div className="flex border-b border-[#3a2f4e]">
         {(['signin', 'signup'] as const).map((m, i) => (
           <button
             key={m}
             onClick={() => { setMode(m); setError(null); setInfo(null); }}
             className={[
               'flex-1 py-3 font-mono text-xs transition-colors',
-              i === 0 ? 'border-r border-white/8' : '',
-              mode === m ? 'bg-white/5 text-white font-bold' : 'text-gray-600 hover:text-gray-300',
+              i === 0 ? 'border-r border-[#3a2f4e]' : '',
+              mode === m ? 'bg-[#332946] text-[#e9e4f0] font-bold' : 'text-[#9a91ad] hover:text-[#c9c2d6]',
             ].join(' ')}
           >
             {m === 'signin' ? 'sign in' : 'sign up'}
@@ -107,22 +107,22 @@ export default function AuthForm() {
 
       <form onSubmit={handleSubmit} className="p-8 space-y-4">
         <div>
-          <label className="block font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-1.5">Email</label>
+          <label className="block font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-1.5">Email</label>
           <input type="email" required value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" className={inputCls} />
         </div>
         <div>
           <div className="flex items-center justify-between mb-1.5">
-            <label className="font-mono text-[10px] text-gray-700 uppercase tracking-widest">Password</label>
+            <label className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">Password</label>
             {mode === 'signin' && (
-              <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null); }} className="font-mono text-[10px] text-gray-700 hover:text-white transition-colors">
+              <button type="button" onClick={() => { setMode('forgot'); setError(null); setInfo(null); }} className="font-mono text-[10px] text-[#7c7291] hover:text-[#e9e4f0] transition-colors">
                 forgot password?
               </button>
             )}
           </div>
           <input type="password" required value={password} onChange={e => setPassword(e.target.value)} placeholder="••••••••" className={inputCls} />
         </div>
-        {error && <p className="font-mono text-[11px] text-red-400">{error}</p>}
-        <button type="submit" disabled={loading} className="w-full bg-white text-black py-2.5 font-mono text-xs font-bold hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+        {error && <p className="font-mono text-[11px] text-[#e0533d]">{error}</p>}
+        <button type="submit" disabled={loading} className="w-full bg-[#b794f4] text-[#201a2b] py-2.5 font-mono text-xs font-bold hover:bg-[#c9b0f8] disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
           {loading ? 'loading…' : mode === 'signin' ? 'sign in' : 'create account'}
         </button>
       </form>

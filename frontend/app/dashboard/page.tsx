@@ -67,26 +67,26 @@ export default function Dashboard() {
   const totalAnomalies = projects.reduce((s, p) => s + p.anomaly_count, 0);
 
   return (
-    <main className="min-h-screen bg-black text-white antialiased">
+    <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] antialiased">
 
       {/* Nav */}
-      <div className="border-b border-white/8">
+      <div className="border-b border-[#3a2f4e]">
         <div className="max-w-5xl mx-auto px-6 h-12 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <a href="/" className="flex items-center gap-2 font-sans font-black text-sm text-white">
+            <a href="/" className="flex items-center gap-2 font-sans font-black text-sm text-[#e9e4f0]">
               <img src="/logo.svg" alt="Cernova" className="w-5 h-5" />
               Cernova
             </a>
-            <span className="text-white/10">|</span>
-            <span className="font-mono text-[11px] text-gray-600">{email}</span>
+            <span className="text-[#7c7291]">|</span>
+            <span className="font-mono text-[11px] text-[#9a91ad]">{email}</span>
           </div>
           <div className="flex items-center gap-5">
-            <a href="/docs" className="font-mono text-[11px] text-gray-600 hover:text-white transition-colors">docs</a>
-            <a href="/settings" className="font-mono text-[11px] text-gray-600 hover:text-white transition-colors">settings</a>
-            <a href="/create-project" className="font-mono text-[11px] font-bold px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white transition-colors">
+            <a href="/docs" className="font-mono text-[11px] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">docs</a>
+            <a href="/settings" className="font-mono text-[11px] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">settings</a>
+            <a href="/create-project" className="font-mono text-[11px] font-bold px-4 py-1.5 bg-[#b794f4] hover:bg-[#b794f4] text-[#e9e4f0] transition-colors">
               + new project
             </a>
-            <button onClick={signOut} className="font-mono text-[11px] text-gray-700 hover:text-white transition-colors">
+            <button onClick={signOut} className="font-mono text-[11px] text-[#7c7291] hover:text-[#e9e4f0] transition-colors">
               sign out
             </button>
           </div>
@@ -95,14 +95,14 @@ export default function Dashboard() {
 
       <div className="max-w-5xl mx-auto px-6 py-8">
         {loading ? (
-          <div className="font-mono text-xs text-gray-700 py-8">loading…</div>
+          <div className="font-mono text-xs text-[#7c7291] py-8">loading…</div>
         ) : projects.length === 0 ? (
           <div className="text-center py-32">
-            <p className="font-sans font-black text-2xl text-white mb-2">No projects yet</p>
-            <p className="font-mono text-xs text-gray-600 mb-8">Create a project to start tracing your AI workflows</p>
+            <p className="font-sans font-black text-2xl text-[#e9e4f0] mb-2">No projects yet</p>
+            <p className="font-mono text-xs text-[#9a91ad] mb-8">Create a project to start tracing your AI workflows</p>
             <a
               href="/create-project"
-              className="font-mono text-xs font-bold px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white transition-colors"
+              className="font-mono text-xs font-bold px-6 py-3 bg-[#b794f4] hover:bg-[#b794f4] text-[#e9e4f0] transition-colors"
             >
               create first project →
             </a>
@@ -110,7 +110,7 @@ export default function Dashboard() {
         ) : (
           <>
             {/* Summary strip */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-white/8 mb-8">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-px bg-[#3a2f4e] mb-8">
               <StatCard label="Total calls"       value={totalCalls.toLocaleString()} />
               <StatCard label="Errors"            value={totalErrors.toLocaleString()} alert={totalErrors > 0} />
               <StatCard label="Anomalies flagged" value={totalAnomalies.toLocaleString()} alert={totalAnomalies > 0} />
@@ -118,10 +118,10 @@ export default function Dashboard() {
 
             {/* Project list */}
             <div>
-              <p className="font-mono text-[10px] text-gray-700 uppercase tracking-widest mb-3">
+              <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-3">
                 Projects ({projects.length})
               </p>
-              <div className="bg-[#0a0a0a] border border-white/8 divide-y divide-white/8">
+              <div className="bg-[#281f38] border border-[#3a2f4e] divide-y divide-[#3a2f4e]">
                 {projects.map((p) => {
                   const errorRate = p.call_count > 0 ? p.error_count / p.call_count : 0;
                   const statusVariant = errorRate === 0 ? 'ok' : errorRate < 0.1 ? 'warning' : 'error';
@@ -129,19 +129,19 @@ export default function Dashboard() {
                     <a
                       key={p.id}
                       href={`/dashboard/${p.id}`}
-                      className="flex items-center justify-between gap-6 px-5 py-4 hover:bg-white/2 transition-colors group"
+                      className="flex items-center justify-between gap-6 px-5 py-4 hover:bg-[#2d2440] transition-colors group"
                     >
                       {/* Left */}
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2 mb-1.5">
                           <Badge variant={statusVariant}>{statusVariant}</Badge>
-                          <span className="font-sans font-bold text-sm text-white group-hover:text-white transition-colors">
+                          <span className="font-sans font-bold text-sm text-[#e9e4f0] group-hover:text-[#e9e4f0] transition-colors">
                             {p.name}
                           </span>
-                          <span className="font-mono text-[10px] text-gray-700">#{p.id.slice(0, 8)}</span>
+                          <span className="font-mono text-[10px] text-[#7c7291]">#{p.id.slice(0, 8)}</span>
                         </div>
                         <div className="flex items-center gap-2 min-w-0">
-                          <code className="font-mono text-[11px] text-green-500 truncate">{p.API_KEY}</code>
+                          <code className="font-mono text-[11px] text-[#7fb59a] truncate">{p.API_KEY}</code>
                           <CopyButton value={p.API_KEY} />
                         </div>
                       </div>
@@ -149,24 +149,24 @@ export default function Dashboard() {
                       {/* Stats */}
                       <div className="flex items-center gap-8 shrink-0 text-right">
                         <div>
-                          <div className="font-sans font-black text-lg text-white">{p.call_count.toLocaleString()}</div>
-                          <div className="font-mono text-[10px] text-gray-700">calls</div>
+                          <div className="font-sans font-black text-lg text-[#e9e4f0]">{p.call_count.toLocaleString()}</div>
+                          <div className="font-mono text-[10px] text-[#7c7291]">calls</div>
                         </div>
                         <div>
-                          <div className={`font-sans font-black text-lg ${p.error_count > 0 ? 'text-red-400' : 'text-gray-800'}`}>
+                          <div className={`font-sans font-black text-lg ${p.error_count > 0 ? 'text-[#e0533d]' : 'text-[#6b6180]'}`}>
                             {p.error_count}
                           </div>
-                          <div className="font-mono text-[10px] text-gray-700">errors</div>
+                          <div className="font-mono text-[10px] text-[#7c7291]">errors</div>
                         </div>
                         <div>
-                          <div className={`font-sans font-black text-lg ${p.anomaly_count > 0 ? 'text-yellow-400' : 'text-gray-800'}`}>
+                          <div className={`font-sans font-black text-lg ${p.anomaly_count > 0 ? 'text-[#d9c964]' : 'text-[#6b6180]'}`}>
                             {p.anomaly_count}
                           </div>
-                          <div className="font-mono text-[10px] text-gray-700">anomalies</div>
+                          <div className="font-mono text-[10px] text-[#7c7291]">anomalies</div>
                         </div>
                         <div>
-                          <div className="font-mono text-xs text-gray-400">{timeAgo(p.last_active)}</div>
-                          <div className="font-mono text-[10px] text-gray-700">last active</div>
+                          <div className="font-mono text-xs text-[#b3abc4]">{timeAgo(p.last_active)}</div>
+                          <div className="font-mono text-[10px] text-[#7c7291]">last active</div>
                         </div>
                       </div>
                     </a>
