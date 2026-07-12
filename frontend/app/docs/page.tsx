@@ -677,11 +677,23 @@ OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <CERNOVA_API_KEY>`}</Code>
         Imported calls are tagged <code className="text-[#e9e4f0]">source=langsmith</code> and deduplicated on their LangSmith run id, so re-running the import never creates duplicates.
       </Callout>
 
-      <H2>On the roadmap</H2>
-      <P>Planned integrations, in rough priority order:</P>
-      <Rows items={[
-        { key: 'Read API', label: 'data out', color: 'text-[#c9c2d6]', value: 'Pull traces, anomalies, and contracts programmatically with your project API key.' },
-      ]} />
+      <H2>Read API</H2>
+      <P>Pull your scored traces and detected anomalies back out — for a dashboard, a notebook, an export, or your own automation. The same project API key you send with, versioned under <code className="text-[#b794f4] f-type">/v1</code>, paginated with an opaque cursor.</P>
+      <Code lang="bash">{`# Recent calls on one step, newest first
+curl "https://api.cernova.dev/v1/calls?step_name=generate-reply&limit=50" \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>"
+
+# Only the runs that tripped a critical anomaly
+curl "https://api.cernova.dev/v1/anomalies?level=critical" \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>"
+
+# One run in full — every call plus its anomaly summary
+curl "https://api.cernova.dev/v1/runs/<run_id>" \\
+  -H "Authorization: Bearer <CERNOVA_API_KEY>"`}</Code>
+      <P>List endpoints return <code className="text-[#b794f4] f-type">{`{ data, has_more, next_cursor }`}</code> — pass <code className="text-[#b794f4] f-type">next_cursor</code> back as <code className="text-[#b794f4] f-type">?cursor=</code> for the next page. Filter <code className="text-[#b794f4] f-type">/v1/calls</code> by <code className="text-[#b794f4] f-type">since</code>, <code className="text-[#b794f4] f-type">step_name</code>, <code className="text-[#b794f4] f-type">run_id</code>, <code className="text-[#b794f4] f-type">model</code>, <code className="text-[#b794f4] f-type">status</code>, and <code className="text-[#b794f4] f-type">anomalous</code>; filter <code className="text-[#b794f4] f-type">/v1/anomalies</code> by <code className="text-[#b794f4] f-type">since</code>, <code className="text-[#b794f4] f-type">level</code>, and <code className="text-[#b794f4] f-type">step_name</code>.</P>
+      <Callout type="info">
+        Responses are a stable public projection, versioned via <code className="text-[#e9e4f0]">schema_version</code> — the same additive contract as webhooks. Raw prompts and model outputs are omitted from Read API responses.
+      </Callout>
     </div>
   );
 }

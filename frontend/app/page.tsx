@@ -631,7 +631,7 @@ export default function LandingPage() {
               ['Vercel AI SDK', 'telemetry', 'in'], ['Langfuse', 'warm-start import', 'in'],
               ['LangSmith', 'warm-start import', 'in'],
               ['Slack', 'alerts out', 'out'], ['Sentry', 'issues + traces', 'out'],
-              ['Webhooks', 'signed events', 'out'],
+              ['Webhooks', 'signed events', 'out'], ['Read API', 'pull traces + anomalies', 'out'],
             ] as [string, string, string][]).map(([name, sub, dir], i) => (
               <Reveal key={name} delay={(i % 5) * 70}>
                 <div className="relative border border-[#e9e4f0] bg-[#281f38] p-5 h-full hover:shadow-[4px_4px_0_#e9e4f0] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all duration-150">

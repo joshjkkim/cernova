@@ -94,7 +94,7 @@ Traces in from what you already run, alerts out to where you already look.
 | Langfuse import (warm-start baselines from existing traces) | traces in | ✅ live |
 | LangSmith import (warm-start baselines from existing traces) | traces in | ✅ live |
 | Generic outbound webhooks (signed events) | alerts out | ✅ live |
-| Read API (pull traces / anomalies / contracts) | data out | 🔜 planned |
+| Read API (`/v1` — pull scored traces & anomalies, paginated) | data out | ✅ live |
 
 ---
 
