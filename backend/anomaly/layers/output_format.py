@@ -75,8 +75,10 @@ def run_output_format(payload: CallInput, config: EvalConfig) -> list[EvalHit]:
     out = payload.output_code or ""
     p = prompt.lower()
 
-    # 2001 / 2002 — JSON contract.
-    if re.search(r"\bjson\b", p):
+    # 2001 / 2002 — JSON contract. Deferred when an enforced learned contract
+    # governs this step's shape: its format_not_json (2010) scores the same
+    # failure, and firing both would double-count one bad output.
+    if not config.contract_governs_format and re.search(r"\bjson\b", p):
         if not _is_json(out):
             fire(2001, observed=_preview(out), expected="parseable JSON")
         elif re.search(r"only json|json only|valid json only|nothing but json", p):

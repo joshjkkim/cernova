@@ -21,6 +21,13 @@ class EvalConfig(BaseModel):
     # its raw threshold checks (4001/4002/4003) to avoid double-counting.
     baseline: StepBaseline | None = None
 
+    # When an *enforced* learned contract governs this step's output shape, the
+    # regex output_format layer defers its JSON checks (2001/2002) to it — the
+    # contract's format_not_json (2010) covers the same failure, so we don't
+    # double-count one bad shape. Same "defer to the more precise signal" rule
+    # the baseline gives numeric_thresholds above.
+    contract_governs_format: bool = False
+
     # Tukey fence multiplier k: fence = Q3 + k*IQR (upper) / Q1 - k*IQR (lower).
     # k=2.5 gives ~0.05% false positive rate on normal data; real LLM distributions
     # are more skewed, so the log-space transform in MetricStat compensates.

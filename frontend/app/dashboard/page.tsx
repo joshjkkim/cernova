@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { authFetch } from '@/lib/api';
 import { Badge, StatCard, CopyButton } from '@/components/ui';
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
@@ -50,7 +51,7 @@ export default function Dashboard() {
 
       if (!profile) { setLoading(false); return; }
 
-      const res = await fetch(`${BACKEND}/projects/owner/${profile.id}`);
+      const res = await authFetch(`${BACKEND}/projects/owner/${profile.id}`);
       if (res.ok) setProjects(await res.json());
       setLoading(false);
     }

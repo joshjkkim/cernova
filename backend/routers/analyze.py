@@ -1,8 +1,9 @@
 import logging
 import os
 import anthropic
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from db import get_client
+from auth import require_owner_of_run
 from services.anomaly_service import get_anomalies_for_run
 from anomaly import CONDITION_REGISTRY
 
@@ -122,7 +123,8 @@ def _check_budget(project_id: str, just_spent: float) -> None:
 
 
 @router.post("/run/{run_id}")
-def analyze_run(run_id: str) -> dict:
+def analyze_run(request: Request, run_id: str) -> dict:
+    require_owner_of_run(request, run_id)   # paid Claude call — owner only
     db = get_client()
 
     calls_res = db.table("CALLS").select("*").eq("run_id", run_id).order("step_index").execute()

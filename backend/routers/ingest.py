@@ -298,24 +298,35 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
             if baseline:
                 config = EvalConfig(**{**config.model_dump(), "baseline": baseline})
                 log.info(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
-        result = evaluate_call(call_input, config)
-
-        # Contract check: compare this output against the step's learned contract.
-        # Enforced hard violations fold into the anomaly score; proposed contracts
-        # are checked and logged only (never silently fabricate an anomaly).
+        # Load the step's learned contract up front. An *enforced* contract is the
+        # source of truth for output shape, so the regex output_format layer defers
+        # its JSON checks (2001/2002) to it — the contract's format_not_json (2010)
+        # covers the same failure, avoiding a double-count.
+        contract = None
         if step_profile_id:
             try:
-                from services.contract_service import load_contract, evaluate_contract
+                from services.contract_service import load_contract
                 contract = load_contract(step_profile_id)
-                if contract:
-                    check, contract_codes = evaluate_contract(contract, payload.output_text)
-                    log.info(f"[contract] profile={step_profile_id} status={contract.status} "
-                             f"passed={check.passed} violations={[v.code for v in check.violations]}")
-                    if contract_codes:
-                        for code, penalty in contract_codes.items():
-                            result.error_map[code] = penalty
-                        result.total_score += sum(contract_codes.values())
-                        result.triggered = result.total_score >= result.threshold
+            except Exception:
+                log.error(f"[contract] load failed for profile={step_profile_id}", exc_info=True)
+        if contract and contract.status == "enforced":
+            config = EvalConfig(**{**config.model_dump(), "contract_governs_format": True})
+
+        result = evaluate_call(call_input, config)
+
+        # Contract check: enforced hard violations fold into the anomaly score;
+        # proposed contracts are checked and logged only (never silently fabricate).
+        if contract:
+            try:
+                from services.contract_service import evaluate_contract
+                check, contract_codes = evaluate_contract(contract, payload.output_text)
+                log.info(f"[contract] profile={step_profile_id} status={contract.status} "
+                         f"passed={check.passed} violations={[v.code for v in check.violations]}")
+                if contract_codes:
+                    for code, penalty in contract_codes.items():
+                        result.error_map[code] = penalty
+                    result.total_score += sum(contract_codes.values())
+                    result.triggered = result.total_score >= result.threshold
             except Exception:
                 log.error(f"[contract] check failed for profile={step_profile_id}", exc_info=True)
 

@@ -1,9 +1,10 @@
 import secrets
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Optional
 from db import get_client
+from auth import require_user, require_owner
 from services.slack_service import send_test_alert
 from services.webhook_service import send_test_webhook
 
@@ -11,7 +12,7 @@ router = APIRouter(prefix="/projects", tags=["projects"])
 
 
 class ProjectCreate(BaseModel):
-    owner: str
+    owner: Optional[str] = None      # ignored — owner is derived from the auth token
     API_KEY: str
     name: str
 
@@ -64,12 +65,14 @@ class ProjectWithCallsResponse(ProjectResponse):
 
 
 @router.post("/", response_model=ProjectResponse, status_code=201)
-def create_project(project: ProjectCreate) -> ProjectResponse:
-    """Create a new project and append its id to the owner's project_list."""
+def create_project(request: Request, project: ProjectCreate) -> ProjectResponse:
+    """Create a new project owned by the authenticated user."""
+    user = require_user(request)
+    owner = user["id"]                       # derived from the token, never the body
     try:
         client = get_client()
         res = client.table("PROJECTS").insert({
-            "owner": project.owner,
+            "owner": owner,
             "API_KEY": project.API_KEY,
             "name": project.name,
         }).execute()
@@ -79,9 +82,9 @@ def create_project(project: ProjectCreate) -> ProjectResponse:
 
         project_id = res.data[0]["id"]
 
-        profile_res = client.table("PROFILES").select("project_list").eq("id", project.owner).single().execute()
+        profile_res = client.table("PROFILES").select("project_list").eq("id", owner).single().execute()
         current: list = profile_res.data.get("project_list") or []
-        client.table("PROFILES").update({"project_list": current + [project_id]}).eq("id", project.owner).execute()
+        client.table("PROFILES").update({"project_list": current + [project_id]}).eq("id", owner).execute()
 
         return ProjectResponse(**res.data[0])
     except HTTPException:
@@ -91,8 +94,11 @@ def create_project(project: ProjectCreate) -> ProjectResponse:
 
 
 @router.get("/owner/{owner_id}", response_model=List[ProjectWithCallsResponse])
-def list_projects_by_owner(owner_id: str) -> List[ProjectWithCallsResponse]:
-    """List all projects owned by a specific user with call counts."""
+def list_projects_by_owner(request: Request, owner_id: str) -> List[ProjectWithCallsResponse]:
+    """List the authenticated user's own projects with call counts."""
+    user = require_user(request)
+    if owner_id != user["id"]:
+        raise HTTPException(status_code=403, detail="You can only list your own projects")
     try:
         client = get_client()
         projects_res = client.table("PROJECTS").select("*").eq("owner", owner_id).execute()
@@ -116,77 +122,23 @@ def list_projects_by_owner(owner_id: str) -> List[ProjectWithCallsResponse]:
             ))
 
         return result
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.get("/", response_model=List[ProjectWithCallsResponse])
-def list_projects() -> List[ProjectWithCallsResponse]:
-    """List all projects with call counts."""
-    try:
-        client = get_client()
-        
-        # Get all projects
-        projects_res = client.table("PROJECTS").select("*").execute()
-        
-        result = []
-        for project in projects_res.data:
-            # Count calls for this project
-            calls_res = client.table("CALLS").select(
-                "id", count="exact"
-            ).eq("project_id", project["id"]).execute()
-            
-            result.append(ProjectWithCallsResponse(
-                **project,
-                call_count=len(calls_res.data)
-            ))
-        
-        return result
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{project_id}", response_model=ProjectResponse)
-def get_project(project_id: str) -> ProjectResponse:
-    """Get a specific project by ID."""
-    try:
-        client = get_client()
-        res = client.table("PROJECTS").select("*").eq("id", project_id).execute()
-        
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        return ProjectResponse(**res.data[0])
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
-
-
-@router.put("/{project_id}", response_model=ProjectResponse)
-def update_project(project_id: str, project: ProjectCreate) -> ProjectResponse:
-    """Update a project."""
-    try:
-        client = get_client()
-        res = client.table("PROJECTS").update({
-            "email": project.email,
-            "API_KEY": project.API_KEY,
-            "name": project.name,
-        }).eq("id", project_id).execute()
-        
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Project not found")
-        
-        return ProjectResponse(**res.data[0])
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc))
+def get_project(request: Request, project_id: str) -> ProjectResponse:
+    """Get a project the authenticated user owns."""
+    project = require_owner(request, project_id)
+    return ProjectResponse(**project)
 
 
 @router.patch("/{project_id}/webhook", response_model=ProjectResponse)
-def update_webhook(project_id: str, body: WebhookUpdate) -> ProjectResponse:
+def update_webhook(request: Request, project_id: str, body: WebhookUpdate) -> ProjectResponse:
     """Save or clear the Slack webhook URL for a project."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         updates: dict = {"slack_webhook_url": body.slack_webhook_url}
@@ -229,8 +181,9 @@ def update_webhook(project_id: str, body: WebhookUpdate) -> ProjectResponse:
 
 
 @router.post("/{project_id}/webhook/test")
-def test_webhook(project_id: str) -> dict:
+def test_webhook(request: Request, project_id: str) -> dict:
     """Send a test ping to the project's configured Slack webhook."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         res = client.table("PROJECTS").select("name,slack_webhook_url").eq("id", project_id).single().execute()
@@ -247,8 +200,9 @@ def test_webhook(project_id: str) -> dict:
 
 
 @router.post("/{project_id}/outbound-webhook/test")
-def test_outbound_webhook(project_id: str) -> dict:
+def test_outbound_webhook(request: Request, project_id: str) -> dict:
     """Send a synthetic anomaly event to the project's outbound webhook_url."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         res = client.table("PROJECTS").select("name,webhook_url,webhook_secret").eq("id", project_id).single().execute()
@@ -265,8 +219,9 @@ def test_outbound_webhook(project_id: str) -> dict:
 
 
 @router.get("/{project_id}/usage")
-def get_usage(project_id: str) -> dict:
+def get_usage(request: Request, project_id: str) -> dict:
     """Return usage/billing summary for a project."""
+    require_owner(request, project_id)
     try:
         from datetime import datetime, timezone
         db = get_client()
@@ -295,13 +250,16 @@ def get_usage(project_id: str) -> dict:
             "by_feature": {k: round(v, 6) for k, v in by_feature.items()},
             "recent": rows[:20],
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{project_id}/thresholds")
-def get_thresholds(project_id: str) -> dict:
+def get_thresholds(request: Request, project_id: str) -> dict:
     """Return current L4 anomaly thresholds for a project (dynamic or static)."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         res = (
@@ -363,13 +321,16 @@ def get_thresholds(project_id: str) -> dict:
             "thresholds": thresholds,
             "baselines": baselines,
         }
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.get("/{project_id}/step-health")
-def get_step_health(project_id: str) -> list[dict]:
+def get_step_health(request: Request, project_id: str) -> list[dict]:
     """Return trend health for every step profile in the project."""
+    require_owner(request, project_id)
     try:
         from services.trend_service import compute_project_health
         results = compute_project_health(project_id)
@@ -392,20 +353,23 @@ def get_step_health(project_id: str) -> list[dict]:
             }
             for r in results
         ]
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
 
 @router.delete("/{project_id}")
-def delete_project(project_id: str) -> dict:
-    """Delete a project"""
+def delete_project(request: Request, project_id: str) -> dict:
+    """Delete a project the authenticated user owns."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         res = client.table("PROJECTS").delete().eq("id", project_id).execute()
-        
+
         if not res.data:
             raise HTTPException(status_code=404, detail="Project not found")
-        
+
         return {"message": "Project deleted successfully"}
     except HTTPException:
         raise

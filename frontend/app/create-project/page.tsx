@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { authFetch } from '@/lib/api';
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
@@ -39,10 +40,10 @@ export default function CreateProject() {
     setError(null);
     setLoading(true);
     try {
-      const res = await fetch(`${BACKEND}/projects/`, {
+      const res = await authFetch(`${BACKEND}/projects/`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ owner: profileId, API_KEY: apiKey, name: name.trim() }),
+        body: JSON.stringify({ API_KEY: apiKey, name: name.trim() }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));

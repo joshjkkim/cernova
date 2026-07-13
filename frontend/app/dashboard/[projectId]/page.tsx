@@ -3,6 +3,7 @@
 import { useEffect, useState, use, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { authFetch } from '@/lib/api';
 import { Badge, StatCard, SearchInput, EmptyState, SegmentedControl, Toggle } from '@/components/ui';
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
@@ -242,7 +243,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     setAnalyzing(true);
     setAnalysis(null);
     try {
-      const res = await fetch(`${BACKEND}/analyze/run/${runId}`, { method: 'POST' });
+      const res = await authFetch(`${BACKEND}/analyze/run/${runId}`, { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setAnalysis({ runId, text: data.analysis, costUsd: data.cost_usd });
@@ -262,18 +263,18 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
         .from('PROFILES').select('id').eq('email', session.user.email).single();
       if (!profile) { router.replace('/dashboard'); return; }
 
-      const res = await fetch(`${BACKEND}/projects/${projectId}`);
+      const res = await authFetch(`${BACKEND}/projects/${projectId}`);
+      if (res.status === 401) { router.replace('/'); return; }
+      if (res.status === 403) { setAuthError(true); return; }
       if (!res.ok) { router.replace('/dashboard'); return; }
       const proj: Project = await res.json();
-
-      if (proj.owner !== profile.id) { setAuthError(true); return; }
       setProject(proj);
 
       const [callsRes, anomaliesRes, registryRes, healthRes] = await Promise.all([
-        fetch(`${BACKEND}/calls/project/${projectId}`),
-        fetch(`${BACKEND}/anomalies/project/${proj.id}`),
-        fetch(`${BACKEND}/anomalies/registry`),
-        fetch(`${BACKEND}/projects/${proj.id}/step-health`),
+        authFetch(`${BACKEND}/calls/project/${projectId}`),
+        authFetch(`${BACKEND}/anomalies/project/${proj.id}`),
+        authFetch(`${BACKEND}/anomalies/registry`),
+        authFetch(`${BACKEND}/projects/${proj.id}/step-health`),
       ]);
       if (callsRes.ok) setCalls((await callsRes.json() as Call[]).slice().reverse());
       if (anomaliesRes.ok) setAnomalies(await anomaliesRes.json() as AnomalyRow[]);
@@ -1090,7 +1091,7 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
     setAnalyzing(true);
     setAnalysis(null);
     try {
-      const res = await fetch(`${BACKEND}/analyze/run/${runId}`, { method: 'POST' });
+      const res = await authFetch(`${BACKEND}/analyze/run/${runId}`, { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setAnalysis({ runId, text: data.analysis, costUsd: data.cost_usd });
@@ -1462,7 +1463,7 @@ function UsageTab({ project }: { project: Project }) {
   } | null>(null);
 
   useEffect(() => {
-    fetch(`${BACKEND_URL}/projects/${project.id}/usage`)
+    authFetch(`${BACKEND_URL}/projects/${project.id}/usage`)
       .then(r => r.json())
       .then(setData)
       .catch(() => {});
@@ -1708,14 +1709,14 @@ function SettingsTab({ project }: { project: Project }) {
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
   useEffect(() => {
-    fetch(`${BACKEND_URL}/projects/${project.id}/thresholds`)
+    authFetch(`${BACKEND_URL}/projects/${project.id}/thresholds`)
       .then(r => r.json()).then(setBaseline).catch(() => {});
   }, [project.id, BACKEND_URL]);
 
   async function save() {
     setSaving(true); setMsg(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/projects/${project.id}/webhook`, {
+      const res = await authFetch(`${BACKEND_URL}/projects/${project.id}/webhook`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1749,7 +1750,7 @@ function SettingsTab({ project }: { project: Project }) {
   async function testWebhook() {
     setTesting(true); setMsg(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/projects/${project.id}/webhook/test`, { method: 'POST' });
+      const res = await authFetch(`${BACKEND_URL}/projects/${project.id}/webhook/test`, { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
       setMsg({ ok: true, text: 'Test message sent — check Slack.' });
     } catch (e) {
@@ -1762,7 +1763,7 @@ function SettingsTab({ project }: { project: Project }) {
   async function testOutbound() {
     setTestingOut(true); setMsg(null);
     try {
-      const res = await fetch(`${BACKEND_URL}/projects/${project.id}/outbound-webhook/test`, { method: 'POST' });
+      const res = await authFetch(`${BACKEND_URL}/projects/${project.id}/outbound-webhook/test`, { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
       setMsg({ ok: true, text: 'Test event delivered — check your endpoint.' });
     } catch (e) {

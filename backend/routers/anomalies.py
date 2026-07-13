@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, HTTPException
 from schemas.anomaly import AnomalyInput, AnomalyRecord
 from services.anomaly_service import ingest_anomalies, get_anomalies_for_run, get_run_penalty_total, get_anomalies_for_project
 from routers.ingest import _resolve_project
+from auth import require_owner, require_owner_of_run
 from anomaly import CONDITION_REGISTRY
 
 router = APIRouter(prefix="/anomalies", tags=["anomalies"])
@@ -18,17 +19,20 @@ def ingest(request: Request, items: list[AnomalyInput]) -> list[AnomalyRecord]:
 
 
 @router.get("/project/{project_id}", response_model=list[AnomalyRecord])
-def get_for_project(project_id: str) -> list[AnomalyRecord]:
+def get_for_project(request: Request, project_id: str) -> list[AnomalyRecord]:
+    require_owner(request, project_id)
     return get_anomalies_for_project(project_id)
 
 
 @router.get("/run/{run_id}", response_model=list[AnomalyRecord])
-def get_for_run(run_id: str) -> list[AnomalyRecord]:
+def get_for_run(request: Request, run_id: str) -> list[AnomalyRecord]:
+    require_owner_of_run(request, run_id)
     return get_anomalies_for_run(run_id)
 
 
 @router.get("/run/{run_id}/score")
-def get_score(run_id: str) -> dict:
+def get_score(request: Request, run_id: str) -> dict:
+    require_owner_of_run(request, run_id)
     return {"run_id": run_id, "total_penalty": get_run_penalty_total(run_id)}
 
 
