@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
 
 // ── Design system: "Amethyst" ────────────────────────────────────────────────
 // A mineralogist's field journal: deep plum paper, lavender ink, violet for
@@ -12,12 +12,15 @@ import { useState, useEffect, useRef, type ReactNode } from 'react'
 // glass, no glow — the anomaly grammar is proofreader's ink:
 //   red ink = fired / critical · gold highlighter = drifting · ink ✓ = clean
 //   violet = Cernova itself (never used for alerts)
+//
+// This page sells the OUTCOME, not the mechanism. The problem (silent LLM
+// failure) and the three things Cernova does about it; every "how" links to
+// /docs. Keep it enticing — no condition codes, no layer internals, no schemas.
 
 const INK = '#e9e4f0'      // lavender-white — everything written
 const RED = '#e0533d'      // anomaly red — fired conditions only
 const VIOLET = '#b794f4'   // brand — kickers, numerals, stamps, crystals
 const PAPER = '#201a2b'    // deep plum
-const RULE = '#3a2f4e'
 const HILITE = '#d9c964'   // gold highlighter for drift
 
 // ── Motion: gentle reveal on scroll ──────────────────────────────────────────
@@ -63,24 +66,11 @@ function Kicker({ children }: { children: ReactNode }) {
   )
 }
 
-// ── Crystals: the brand mark, cut like an engraving ──────────────────────────
-
-function CrystalMark({ size = 16 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" className="shrink-0">
-      <polygon points="12,2 20,9 12,22 4,9" fill={VIOLET} fillOpacity="0.22" stroke={VIOLET} strokeWidth="1.6" strokeLinejoin="miter" />
-      <path d="M4 9 H20 M12 2 V22" stroke={VIOLET} strokeWidth="0.9" opacity="0.75" fill="none" />
-    </svg>
-  )
-}
-
 function CrystalPlate() {
   return (
     <figure className="inline-block">
       <svg width="300" height="150" viewBox="0 0 300 150" aria-hidden="true" className="block mx-auto max-w-full">
-        {/* rock base */}
         <polygon points="28,132 272,132 252,146 48,146" fill="none" stroke={INK} strokeWidth="1.2" opacity="0.5" />
-        {/* shards */}
         <g stroke={VIOLET} strokeWidth="1.6" strokeLinejoin="miter">
           <polygon points="36,132 48,100 60,132" fill={VIOLET} fillOpacity="0.10" />
           <polygon points="52,132 70,52 88,132" fill={VIOLET} fillOpacity="0.14" />
@@ -88,7 +78,6 @@ function CrystalPlate() {
           <polygon points="150,132 178,60 202,132" fill={VIOLET} fillOpacity="0.14" />
           <polygon points="202,132 222,92 240,132" fill={VIOLET} fillOpacity="0.10" />
         </g>
-        {/* facet lines */}
         <g stroke={VIOLET} strokeWidth="0.8" opacity="0.6" fill="none">
           <path d="M48 100 L50 132 M70 52 L74 132 M118 18 L112 132 M118 18 L136 132 M178 60 L182 132 M222 92 L224 132" />
         </g>
@@ -104,7 +93,7 @@ function SectionHead({ no, kicker, title, aside }: { no: string; kicker: string;
       <div className="border-t-2 border-[#e9e4f0] pt-5 mb-14">
         <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
           <div>
-            <Kicker>{`§ ${no} — ${kicker}`}</Kicker>
+            <Kicker>{`${no} — ${kicker}`}</Kicker>
             <h2 className="f-news font-bold text-5xl sm:text-6xl text-[#e9e4f0] mt-5 leading-[1.02] tracking-tight">{title}</h2>
           </div>
           {aside && <p className="f-news italic text-[17px] text-[#9a91ad] max-w-sm lg:text-right leading-7">{aside}</p>}
@@ -125,6 +114,14 @@ function InkButton({ href, children }: { href: string; children: ReactNode }) {
   )
 }
 
+function DocsLink({ children = 'How it works →' }: { children?: ReactNode }) {
+  return (
+    <Link href="/docs" className="f-type text-[11px] uppercase tracking-[0.14em] text-[#9a91ad] hover:text-[#b794f4] transition-colors">
+      {children}
+    </Link>
+  )
+}
+
 // ── FIG. 1 — a live, faithful run ─────────────────────────────────────────────
 // Mirrors the real dashboard run-waterfall: steps stream in with latency bars,
 // one spikes in red ink, the engine scores it, threshold trips. Then loops.
@@ -138,12 +135,12 @@ const CLEAN: Step[] = [
   { name: 'generate-reply',  ms: 1240, tokens: '312tk', bar: INK },
 ]
 
-const SPIKE: Step = { name: 'retrieve-context', ms: 8400, tokens: '3tk', bar: RED, note: '+4.1×IQR past fence' }
+const SPIKE: Step = { name: 'retrieve-context', ms: 8400, tokens: '3tk', bar: RED, note: '8× slower than its usual — flagged' }
 
 function LiveRun() {
-  const [phase, setPhase] = useState(0) // 0..7 timeline of the story
+  const [phase, setPhase] = useState(0)
   useEffect(() => {
-    const seq = [700, 700, 700, 700, 900, 800, 800, 2600] // ms per phase
+    const seq = [700, 700, 700, 700, 900, 800, 800, 2600]
     const t = setTimeout(() => setPhase(p => (p + 1) % seq.length), seq[phase])
     return () => clearTimeout(t)
   }, [phase])
@@ -153,18 +150,15 @@ function LiveRun() {
   const shown = phase >= 4 ? 4 : phase + 1
   const maxMs = 8400
   const score = phase < 5 ? 0 : phase === 5 ? 30 : phase === 6 ? 50 : 110
-  const spikedRow = spiked
 
   return (
     <figure>
       <div className="border-2 border-[#e9e4f0] bg-[#281f38] shadow-[7px_7px_0_#e9e4f0]">
-        {/* plate header */}
         <div className="flex items-center justify-between px-5 py-2.5 border-b-2 border-[#e9e4f0]">
           <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9e4f0]">Fig. 1 — run:a3f9 · support-agent</span>
           <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e0533d]">● live</span>
         </div>
 
-        {/* waterfall */}
         <div className="p-6 space-y-4 min-h-[280px]">
           {rows.slice(0, shown).map((s, i) => (
             <div key={i} className="f-type text-[12px]">
@@ -180,12 +174,11 @@ function LiveRun() {
           ))}
         </div>
 
-        {/* score rule */}
         <div className="border-t-2 border-[#e9e4f0] px-6 py-4">
           <div className="flex items-center justify-between f-type text-[11px] mb-2">
-            <span className="uppercase tracking-[0.18em] text-[#9a91ad]">anomaly score</span>
+            <span className="uppercase tracking-[0.18em] text-[#9a91ad]">health</span>
             <span className="font-bold" style={{ color: score > 0 ? RED : INK }}>
-              {score >= 100 ? `${score}pts — TRIGGERED → #prod-alerts` : score > 0 ? `${score}pts — warning` : '0pts — clean ✓'}
+              {score >= 100 ? 'broken → alerted to #prod' : score > 0 ? 'drifting…' : 'all steps normal ✓'}
             </span>
           </div>
           <div className="h-2.5 border border-[#e9e4f0]/30 bg-[#332946] relative">
@@ -195,173 +188,13 @@ function LiveRun() {
         </div>
       </div>
       <figcaption className="f-type text-[11px] text-[#9a91ad] mt-3 leading-5">
-        Fig. 1 — A production run scored in real time. {spikedRow ? 'The retrieval step has broken its fence; the correction is marked in red.' : 'Four steps against their own baselines.'}
+        Fig. 1 — A production run, watched live. {spiked ? 'One step just broke its normal pattern — caught, scored, and pushed to your alerts.' : 'Every step measured against what it normally does.'}
       </figcaption>
     </figure>
   )
 }
 
-// ── Column vignettes: Detect → Learn → Confirm → Warm-start ──────────────────
-
-function ScoreMini() {
-  const [n, setN] = useState(0)
-  useEffect(() => { const t = setInterval(() => setN(v => (v + 1) % 4), 900); return () => clearInterval(t) }, [])
-  const vals = [0, 50, 80, 110]
-  const v = vals[n]
-  return (
-    <div className="f-type text-[11px] space-y-1.5">
-      {[['2001', 'json_format'], ['5001', 'latency_iqr'], ['1007', 'token_mismatch']].map(([c, name], i) => (
-        <div key={c} className={`flex gap-2 transition-opacity duration-300 ${n > i ? 'opacity-100' : 'opacity-25'}`}>
-          <span className="font-bold" style={{ color: RED }}>{c}</span>
-          <span className="text-[#e9e4f0]">{name}</span>
-        </div>
-      ))}
-      <div className="h-2 border border-[#e9e4f0]/30 bg-[#332946] mt-2">
-        <div className="h-full transition-all duration-500" style={{ width: `${Math.min(100, v)}%`, background: v >= 100 ? RED : '#d9a441' }} />
-      </div>
-      <div className="text-right font-bold" style={{ color: v >= 100 ? RED : '#9a91ad' }}>{v}pts / 100</div>
-    </div>
-  )
-}
-
-function ContractMini() {
-  return (
-    <div className="f-type text-[11px] space-y-1.5 text-[#e9e4f0]">
-      <div className="text-[#9a91ad]">learned from 200 outputs →</div>
-      <div className="border border-[#e9e4f0] bg-[#201a2b] p-2.5 space-y-1">
-        <div className="flex justify-between"><span>format</span><span className="font-bold">json</span></div>
-        <div className="flex justify-between"><span>required</span><span className="font-bold">name · age · verdict</span></div>
-        <div className="flex justify-between"><span>verdict ∈</span><span className="font-bold">approve · deny</span></div>
-      </div>
-      <div className="italic" style={{ color: '#d9a441' }}>status: proposed — awaiting confirm</div>
-    </div>
-  )
-}
-
-function ConfirmMini() {
-  const [on, setOn] = useState<'none' | 'yes' | 'no'>('none')
-  useEffect(() => {
-    const seq: ('none' | 'yes' | 'no')[] = ['none', 'yes', 'yes', 'none', 'no', 'none']
-    let i = 0
-    const t = setInterval(() => { i = (i + 1) % seq.length; setOn(seq[i]) }, 1100)
-    return () => clearInterval(t)
-  }, [])
-  return (
-    <div className="f-type text-[11px] space-y-3">
-      <div className="text-[#e9e4f0]">anomaly 5001 fired on generate-reply.<br />was it real?</div>
-      <div className="flex gap-2">
-        <span className={`px-3 py-1 border transition-colors ${on === 'yes' ? 'bg-[#e9e4f0] text-[#201a2b] border-[#e9e4f0]' : 'border-[#e9e4f0]/40 text-[#9a91ad]'}`}>✓ confirm</span>
-        <span className={`px-3 py-1 border font-bold transition-colors ${on === 'no' ? 'border-[#e0533d] text-[#e0533d]' : 'border-[#e9e4f0]/40 text-[#9a91ad] font-normal'}`}>✕ false alarm</span>
-      </div>
-      <div className="text-[#9a91ad] italic">{on === 'yes' ? '→ contract enforced, now scores' : on === 'no' ? '→ call re-folded into baseline' : '→ your label. only you can give it.'}</div>
-    </div>
-  )
-}
-
-function BaselineMini() {
-  const [n, setN] = useState(0)
-  useEffect(() => { const t = setInterval(() => setN(v => (v >= 200 ? 0 : v + 20)), 500); return () => clearInterval(t) }, [])
-  const warm = n >= 20
-  return (
-    <div className="f-type text-[11px] space-y-2">
-      <div className="text-[#9a91ad]">imported from Langfuse →</div>
-      <div className="flex items-end gap-[3px] h-12 border-b border-[#e9e4f0]">
-        {Array.from({ length: 20 }).map((_, i) => (
-          <div key={i} className="flex-1 transition-all duration-300" style={{ height: `${20 + ((i * 37) % 60)}%`, background: i * 10 < n ? INK : '#443659' }} />
-        ))}
-      </div>
-      <div className="flex justify-between">
-        <span className="text-[#e9e4f0]">baseline n={n}</span>
-        <span className="font-bold" style={{ color: warm ? INK : '#9a91ad' }}>{warm ? 'baseline active ✓' : 'warming…'}</span>
-      </div>
-    </div>
-  )
-}
-
-const PILLARS = [
-  { no: 'I', k: 'Detect', head: 'Catch what your logs call success.', body: 'A 4-layer engine scores every call — hard failures, format breaks, numeric limits, and statistical drift against each step’s own history. Silent regressions surface loud.', visual: <ScoreMini /> },
-  { no: 'II', k: 'Learn', head: 'Contracts it writes itself.', body: 'Cernova induces each step’s output contract from its real history — required keys, JSON shape, enum domains. No schema to hand-write; it learns what “normal output” means.', visual: <ContractMini /> },
-  { no: 'III', k: 'Confirm', head: 'One tap tightens detection.', body: 'Confirm a real anomaly or flag a false alarm. Every verdict tunes your project — proprietary labels only your production traffic can produce, feeding the model that watches it.', visual: <ConfirmMini /> },
-  { no: 'IV', k: 'Warm-start', head: 'Signal on day one.', body: 'Import your Langfuse or LangSmith history and baselines build from real traffic in minutes — no waiting to accrue calls. Backdated, deduped, silent. You see anomalies immediately.', visual: <BaselineMini /> },
-]
-
-function Pillars() {
-  return (
-    <div className="grid grid-cols-1 md:grid-cols-2 border-2 border-[#e9e4f0] bg-[#281f38]">
-      {PILLARS.map((p, i) => (
-        <div key={p.k} className={[
-          'p-8 border-[#e9e4f0]',
-          i % 2 === 0 ? 'md:border-r' : '',
-          i < 2 ? 'border-b' : '',
-          i === 2 ? 'border-b md:border-b-0' : '',
-        ].join(' ')}>
-          <Reveal delay={i * 100}>
-            <div className="flex items-baseline gap-3 mb-4">
-              <span className="f-news text-2xl italic text-[#b794f4]">{p.no}.</span>
-              <span className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#e9e4f0]">{p.k}</span>
-            </div>
-            <h3 className="f-news font-bold text-[26px] text-[#e9e4f0] mb-3 leading-tight">{p.head}</h3>
-            <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-6">{p.body}</p>
-            <div className="border-t border-[#3a2f4e] pt-5">{p.visual}</div>
-          </Reveal>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-// ── TABLE I — the detection layers ────────────────────────────────────────────
-
-type LayerKey = 'hard' | 'format' | 'numeric' | 'statistical'
-const LAYERS: Record<LayerKey, { name: string; codes: string; desc: string; example: { text: string; red?: boolean }[] }> = {
-  hard: { name: 'Hard failures', codes: '1001–1008', desc: 'Deterministic. status_success=false, non-empty error, token accounting mismatch, negative values. Any hit → 100pts → immediate trigger. No heuristics.', example: [{ text: 'status_success: false', red: true }, { text: 'error: "context_length_exceeded"', red: true }, { text: '' }, { text: '↳ 1001  status_failure  +100pts  TRIGGERED', red: true }] },
-  format: { name: 'Format violations', codes: '2001–2012', desc: 'Prompt-implied contracts. "Return JSON" → output must be JSON. Yes/no prompts, enum constraints, strict JSON (no fences). Learned contracts fold in here too.', example: [{ text: 'prompt:  "return JSON: name, email"' }, { text: 'output:  "The user appears to be..."' }, { text: '' }, { text: '↳ 2001  json_contract_violation  +50pts', red: true }] },
-  numeric: { name: 'Numeric limits', codes: '4001–4010', desc: 'Adaptive p95 thresholds for latency, tokens, cost — scoped per step profile. Cross-field plausibility. Stall detection. Defers to the statistical layer once a baseline is warm.', example: [{ text: 'latency_ms:    8400' }, { text: 'output_tokens: 3' }, { text: '' }, { text: '↳ 4007  high_latency_low_output  +20pts', red: true }] },
-  statistical: { name: 'Statistical baseline', codes: '5001–5004', desc: 'IQR/log-normal detection against each step’s own call history. Tukey fence in log space — catches multiplicative outliers (5× slower) z-scores miss. Activates after 20 clean calls.', example: [{ text: 'baseline: Q1=240ms Q3=340ms IQR=0.35' }, { text: 'fence: e^(log(Q3)+2.5×IQR) ≈ 510ms' }, { text: 'observed: 1840ms → +3.2×IQR', red: true }, { text: '' }, { text: '↳ 5001  latency_iqr_fence  +30pts', red: true }] },
-}
-
-function LayerTable() {
-  const [active, setActive] = useState<LayerKey | null>('statistical')
-  const layers = Object.keys(LAYERS) as LayerKey[]
-  return (
-    <Reveal>
-      <div className="border-2 border-[#e9e4f0] bg-[#281f38]">
-        <div className="px-5 py-2.5 border-b-2 border-[#e9e4f0] f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9e4f0]">
-          Table I — The four detection layers
-        </div>
-        {layers.map((k) => {
-          const l = LAYERS[k]; const on = active === k
-          return (
-            <div key={k} className="border-b border-[#3a2f4e] last:border-b-0">
-              <button
-                onClick={() => setActive(on ? null : k)}
-                className={`w-full text-left px-5 py-4 grid grid-cols-[1fr_auto] sm:grid-cols-[220px_110px_1fr_auto] gap-4 items-baseline transition-colors ${on ? 'bg-[#2d2440]' : 'hover:bg-[#2d2440]/60'}`}
-              >
-                <span className={`f-news font-bold text-lg ${on ? 'text-[#b794f4]' : 'text-[#e9e4f0]'}`}>{l.name}</span>
-                <span className="f-type text-[11px] text-[#9a91ad] hidden sm:block">{l.codes}</span>
-                <span className="f-news text-[15px] text-[#c9c2d6] leading-6 hidden sm:block truncate">{l.desc.split('.')[0]}.</span>
-                <span className="f-type text-[11px] text-[#9a91ad]">{on ? '– close' : '+ open'}</span>
-              </button>
-              {on && (
-                <div className="px-5 pb-6 grid grid-cols-1 lg:grid-cols-2 gap-6 bg-[#2d2440]">
-                  <p className="f-news text-[16px] text-[#c9c2d6] leading-7">{l.desc}</p>
-                  <div className="border border-[#e9e4f0] bg-[#201a2b] p-4 f-type text-[12px] leading-6">
-                    {l.example.map((e, i) => (
-                      <div key={i} className={e.red ? 'font-bold' : ''} style={{ color: e.red ? RED : '#c9c2d6' }}>{e.text || ' '}</div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )
-        })}
-      </div>
-      <p className="f-type text-[11px] text-[#9a91ad] mt-3">Scores accumulate per call; once the total crosses 100pts the call is flagged and the alert fires.</p>
-    </Reveal>
-  )
-}
-
-// ── FIG. 2 — the steps ledger ─────────────────────────────────────────────────
+// ── FIG. 2 — the steps ledger (dashboard glimpse) ─────────────────────────────
 
 const STEPS_HEALTH = [
   { step: 'classify-intent',  p95: '96ms',   cost: '$0.00001', status: '✓ healthy',  hl: false, red: false },
@@ -399,7 +232,7 @@ function ProductBoard() {
               </div>
             ))}
             <div className="px-5 py-3 f-type text-[11px] text-[#9a91ad] italic">
-              <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>retrieve-context</span> +1.8×IQR latency · <span className="font-bold" style={{ color: RED }}>generate-reply</span> +3.4×IQR cost
+              <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>retrieve-context</span> creeping slower · <span className="font-bold" style={{ color: RED }}>generate-reply</span> cost spiking
             </div>
           </div>
         ) : (
@@ -421,29 +254,125 @@ function ProductBoard() {
   )
 }
 
-// ── Small helpers ─────────────────────────────────────────────────────────────
+// ── Ticker: plain-language silent failures (no codes) ─────────────────────────
 
-function CopyBtn({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
-  return (
-    <button onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500) }} className="f-type text-[10px] uppercase tracking-[0.14em] text-[#9a91ad] hover:text-[#b794f4] transition-colors">
-      {done ? 'copied ✓' : 'copy'}
-    </button>
-  )
+const TICKER: string[] = [
+  'hallucinated a field',
+  'returned prose where JSON was required',
+  '8× slower than usual',
+  'cost tripled overnight',
+  'dropped a required key',
+  'empty output — status 200 OK',
+  'drifted off its allowed values',
+  'silently truncated mid-answer',
+]
+
+// ── The three outcomes ────────────────────────────────────────────────────────
+
+const OUTCOMES: { no: string; head: string; body: string }[] = [
+  {
+    no: 'I',
+    head: 'Learns as your agent runs.',
+    body: 'Point Cernova at your traffic and it figures out what normal looks like for every step your app takes — no rules, no schemas, no thresholds to tune. The more it runs, the sharper it gets.',
+  },
+  {
+    no: 'II',
+    head: 'Catches what your logs call success.',
+    body: 'A prompt tweak, a model bump, a slow drift in cost or latency — the silent regressions that sail past every health check surface loud, per step, the moment they start.',
+  },
+  {
+    no: 'III',
+    head: 'Tells you before your users do.',
+    body: 'The instant a step breaks its own pattern, Cernova flags it — to Slack, Sentry, or your own webhook — with the run, what changed, and one-tap root cause.',
+  },
+]
+
+// ── Starfield: an engraved night-sky plate (nova = a star, brightening) ───────
+// Printed, not glowing — tiny ink dots + a few violet cross-marks + one focal
+// "nova" burst, drawn like an antique celestial chart. Deterministic seed so
+// server and client render the same points; gentle scroll parallax for depth.
+
+function mulberry32(seed: number) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
 }
 
-const TICKER: [string, string][] = [
-  ['1001', 'status_failure'],
-  ['1007', 'token_accounting_mismatch'],
-  ['2001', 'json_contract_violation'],
-  ['2011', 'missing_required_key'],
-  ['4007', 'high_latency_low_output'],
-  ['5001', 'latency_iqr_fence'],
-  ['5002', 'tokens_iqr_fence'],
-  ['2003', 'enum_contract_violation'],
-  ['5003', 'cost_iqr_fence'],
-  ['1003', 'empty_output_on_success'],
-]
+function StarField() {
+  const layer = useRef<HTMLDivElement>(null)
+  const { stars, lines } = useMemo(() => {
+    const rnd = mulberry32(20260712)
+    const W = 1440, H = 900
+    const stars = Array.from({ length: 88 }, () => {
+      const bright = rnd() < 0.15
+      return {
+        x: rnd() * W, y: rnd() * H,
+        r: bright ? 1.4 + rnd() * 1.0 : 0.5 + rnd() * 0.9,
+        violet: bright || rnd() < 0.28,
+        o: bright ? 0.4 + rnd() * 0.3 : 0.07 + rnd() * 0.15,
+        cross: bright && rnd() < 0.7,
+        dur: (4.5 + rnd() * 5).toFixed(1),   // twinkle period
+        delay: (rnd() * 6).toFixed(1),
+      }
+    })
+    const lines = [
+      [stars[3], stars[12], stars[21], stars[30]],
+      [stars[54], stars[61], stars[70]],
+    ].map(pts => pts.map(p => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join(' '))
+    return { stars, lines }
+  }, [])
+
+  // Scroll parallax on the outer layer; continuous drift lives in CSS on an
+  // inner group, so the two transforms compose without fighting.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    let raf = 0
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        if (layer.current) layer.current.style.transform = `translate3d(0, ${window.scrollY * 0.055}px, 0)`
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
+  }, [])
+
+  return (
+    <div ref={layer} className="fixed inset-0 z-0 pointer-events-none" aria-hidden="true">
+      <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" className="w-full h-full">
+        <g className="skydrift">
+          <g stroke={INK} strokeOpacity="0.08" strokeWidth="0.6" fill="none">
+            {lines.map((pts, i) => <polyline key={i} points={pts} />)}
+          </g>
+          {stars.map((s, i) => s.cross ? (
+            <g key={i} className="tw" style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+               stroke={s.violet ? VIOLET : INK} strokeOpacity={s.o} strokeWidth="0.8" strokeLinecap="round">
+              <line x1={s.x - s.r * 2.6} y1={s.y} x2={s.x + s.r * 2.6} y2={s.y} />
+              <line x1={s.x} y1={s.y - s.r * 2.6} x2={s.x} y2={s.y + s.r * 2.6} />
+            </g>
+          ) : (
+            <circle key={i} className="tw" style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+              cx={s.x} cy={s.y} r={s.r} fill={s.violet ? VIOLET : INK} fillOpacity={s.o} />
+          ))}
+          {/* the nova — the Cernova logomark itself, faint and slowly brightening */}
+          <g className="nova" transform="translate(560 610) scale(0.145) translate(-256 -256)"
+             fill="none" stroke={VIOLET} strokeOpacity="0.6" strokeLinejoin="round" strokeLinecap="round">
+            <path strokeWidth="9" d="M256,32 L307,205 L480,256 L307,307 L256,480 L205,307 L32,256 L205,205 Z" />
+            <g strokeWidth="5">
+              <line x1="256" y1="32" x2="256" y2="212" /><line x1="480" y1="256" x2="300" y2="256" />
+              <line x1="256" y1="480" x2="256" y2="300" /><line x1="32" y1="256" x2="212" y2="256" />
+            </g>
+            <path strokeWidth="9" d="M256,212 L300,256 L256,300 L212,256 Z" />
+          </g>
+        </g>
+      </svg>
+    </div>
+  )
+}
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
@@ -456,22 +385,33 @@ export default function LandingPage() {
         .f-type { font-family: var(--font-type), 'Courier New', monospace; }
         ::selection { background: ${HILITE}; color: ${PAPER}; }
         @keyframes t { from { transform: translateX(0) } to { transform: translateX(-50%) } }
-        .tk { animation: t 40s linear infinite; }
+        .tk { animation: t 44s linear infinite; }
         .tk:hover { animation-play-state: paused; }
         @media (prefers-reduced-motion: reduce) { .tk { animation: none !important; } }
         .dropcap::first-letter { float: left; font-size: 3.4em; line-height: .85; padding-right: 10px; padding-top: 4px; font-weight: 700; color: ${VIOLET}; }
+        @keyframes nova { 0%, 100% { opacity: .5 } 50% { opacity: .95 } }
+        .nova { animation: nova 5.5s ease-in-out infinite; }
+        @keyframes skydrift { from { transform: translate(0,0) } to { transform: translate(-16px, 10px) } }
+        .skydrift { animation: skydrift 70s ease-in-out infinite alternate; }
+        @keyframes tw { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+        .tw { animation-name: tw; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        @media (prefers-reduced-motion: reduce) { .nova, .skydrift, .tw { animation: none !important; } }
       `}</style>
+
+      <StarField />
+      <div className="relative z-10">
 
       {/* ── Masthead ── */}
       <nav className="sticky top-0 z-50 bg-[#201a2b] border-b-2 border-[#e9e4f0]">
         <div className="max-w-6xl mx-auto px-6 h-14 flex items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 f-news font-bold text-xl tracking-tight text-[#e9e4f0]">
-            <CrystalMark size={17} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="" width={22} height={22} className="shrink-0" />
             Cernova
           </Link>
           <div className="flex items-center gap-7">
-            <a href="#how" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">How it works</a>
-            <a href="#product" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Product</a>
+            <a href="#problem" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">The problem</a>
+            <a href="#solution" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">What it does</a>
             <a href="#stack" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Integrations</a>
             <Link href="/docs" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Docs</Link>
             <Link href="/login" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors">Sign in</Link>
@@ -483,7 +423,6 @@ export default function LandingPage() {
       {/* ── Front page ── */}
       <section className="px-6 pt-10 pb-20">
         <div className="max-w-6xl mx-auto">
-          {/* dateline */}
           <div className="border-b border-[#e9e4f0] pb-2 mb-12 flex items-center justify-between f-type text-[10px] uppercase tracking-[0.22em] text-[#9a91ad]">
             <span>Vol. I — The detection layer for LLM pipelines</span>
             <span className="hidden sm:block">Open beta · free to start</span>
@@ -492,21 +431,21 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-14 items-start">
             <Reveal>
               <h1 className="f-news font-bold text-6xl sm:text-[84px] leading-[0.98] tracking-tight text-[#e9e4f0] mb-8">
-                Your LLM is failing. <em className="not-italic" style={{ color: VIOLET }}><span className="italic">Silently.</span></em>
+                Your agent is failing. <em className="not-italic" style={{ color: VIOLET }}><span className="italic">Silently.</span></em>
               </h1>
               <p className="f-news text-xl text-[#c9c2d6] leading-8 max-w-lg mb-10">
-                LLMs don&apos;t throw exceptions. They hallucinate, break JSON, spike cost, and drift — while your logs stay green. Cernova scores every call, learns each step&apos;s normal, and tells you the moment one breaks.
+                LLMs don&apos;t throw exceptions. They hallucinate, break their format, spike cost, and drift — while every dashboard stays green. Cernova learns what each step of your app normally does, and tells you the moment one breaks.
               </p>
               <div className="flex items-center gap-7 mb-12">
                 <InkButton href="/login">Start free →</InkButton>
                 <Link href="/docs" className="f-type text-[12px] uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#b794f4] decoration-2 underline-offset-4 hover:text-[#b794f4] transition-colors">Read the docs</Link>
               </div>
               <div className="border-y border-[#e9e4f0] py-3 f-type text-[11px] uppercase tracking-[0.16em] text-[#e9e4f0] flex flex-wrap gap-x-6 gap-y-1">
-                <span><b>4</b> detection layers</span>
+                <span>Silent failures, <b>caught</b></span>
                 <span>·</span>
-                <span><b>~1ms</b> overhead per call</span>
+                <span><b>~1ms</b> overhead</span>
                 <span>·</span>
-                <span><b>0</b> config files</span>
+                <span><b>Nothing</b> to configure</span>
               </div>
             </Reveal>
             <Reveal delay={150}>
@@ -516,15 +455,15 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── Wire ticker ── */}
+      {/* ── Wire ticker — silent failures ── */}
       <div className="border-y-2 border-[#e9e4f0] py-2.5 overflow-hidden bg-[#332946]">
         <div className="flex whitespace-nowrap tk">
           {[...Array(2)].map((_, i) => (
             <div key={i} className="flex shrink-0">
-              {TICKER.map(([code, name]) => (
-                <span key={code} className="inline-flex items-baseline gap-2 px-6 f-type text-[11px]">
-                  <span className="font-bold" style={{ color: RED }}>{code}</span>
-                  <span className="text-[#c9c2d6]">{name}</span>
+              {TICKER.map((phrase, j) => (
+                <span key={`${i}-${j}`} className="inline-flex items-baseline gap-3 px-6 f-type text-[11px]">
+                  <span className="font-bold" style={{ color: RED }}>✕</span>
+                  <span className="text-[#c9c2d6]">{phrase}</span>
                   <span className="text-[#5c5273] pl-4">///</span>
                 </span>
               ))}
@@ -533,44 +472,72 @@ export default function LandingPage() {
         </div>
       </div>
 
-      {/* ── § 1 — How it works ── */}
-      <section id="how" className="px-6 py-24">
+      {/* ── § 1 — The problem ── */}
+      <section id="problem" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
           <SectionHead
             no="1"
-            kicker="How it works"
-            title={<>Detect. Learn. Confirm.<br />Warm-start.</>}
-            aside="Four moves that turn raw traces into a detector that gets sharper the more you use it."
+            kicker="The problem"
+            title={<>Green dashboards.<br />Broken agents.</>}
+            aside="The failures that matter most are the ones nothing alerts on."
           />
-          <Pillars />
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-14 items-start">
+            <Reveal className="lg:col-span-3">
+              <p className="dropcap f-news text-[19px] text-[#c9c2d6] leading-9 mb-6">
+                An LLM call that hallucinates a field returns HTTP 200. So does one that drops a required key, ignores your format, slows to a crawl, or quietly costs three times as much. Your logs, your traces, your APM — all green. Nothing is on fire, so nothing pages you.
+              </p>
+              <p className="f-news text-[19px] text-[#c9c2d6] leading-9">
+                The regression ships. It runs for days. The first real signal is a customer complaint — and by then you&apos;re reading transcripts trying to guess which prompt change, which model bump, broke which step.
+              </p>
+            </Reveal>
+            <Reveal delay={150} className="lg:col-span-2">
+              <blockquote className="border-l-2 border-[#e0533d] pl-6 py-2">
+                <p className="f-news italic text-[27px] sm:text-[32px] leading-[1.25] text-[#e9e4f0]">
+                  &ldquo;By the time someone reports it, it&apos;s been broken for a&nbsp;week.&rdquo;
+                </p>
+                <footer className="f-type text-[11px] uppercase tracking-[0.18em] text-[#9a91ad] mt-5">— every team shipping LLMs to production</footer>
+              </blockquote>
+            </Reveal>
+          </div>
         </div>
       </section>
 
-      {/* ── § 2 — The engine ── */}
-      <section id="detection" className="px-6 py-24">
+      {/* ── § 2 — What Cernova does (outcomes) ── */}
+      <section id="solution" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
           <SectionHead
             no="2"
-            kicker="Inside the engine"
-            title={<>Four layers.<br />Nothing slips past.</>}
-            aside="Hard failures, format breaks, numeric limits, statistical drift — each layer catches what the others can't."
+            kicker="What Cernova does"
+            title={<>It learns your app.<br />Then it watches it.</>}
+            aside="Three things — none of which you have to set up."
           />
-          <LayerTable />
+          <div className="grid grid-cols-1 md:grid-cols-3 border-2 border-[#e9e4f0] bg-[#281f38]">
+            {OUTCOMES.map((o, i) => (
+              <div key={o.no} className={['p-8 border-[#e9e4f0]', i < OUTCOMES.length - 1 ? 'border-b md:border-b-0 md:border-r' : ''].join(' ')}>
+                <Reveal delay={i * 100}>
+                  <span className="f-news text-3xl italic text-[#b794f4]">{o.no}.</span>
+                  <h3 className="f-news font-bold text-[27px] text-[#e9e4f0] mt-4 mb-3 leading-tight">{o.head}</h3>
+                  <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-6">{o.body}</p>
+                  <DocsLink />
+                </Reveal>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 
-      {/* ── § 3 — The product ── */}
+      {/* ── § 3 — See it (the dashboard) ── */}
       <section id="product" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
           <SectionHead
             no="3"
-            kicker="The dashboard"
+            kicker="See it"
             title={<>Not another<br />pane of glass.</>}
           />
           <div className="grid grid-cols-1 lg:grid-cols-5 gap-14 items-start">
             <Reveal className="lg:col-span-2">
               <p className="dropcap f-news text-[17px] text-[#c9c2d6] leading-8 mb-6">
-                Every step gets a semantic profile and its own baseline. The steps view ranks what&apos;s drifting and what&apos;s critical — latency creep and cost drift that per-call checks miss. Click any run for the full waterfall and one-tap AI root-cause.
+                Every step gets its own baseline. The board ranks what&apos;s drifting and what&apos;s critical — the slow latency creep and cost drift that per-call checks miss — and one tap on any run gives you an AI root-cause of what broke and why.
               </p>
               <p className="f-news text-[17px] text-[#c9c2d6] leading-8 mb-8">
                 Anomalies read like proofreader&apos;s marks: drift gets the <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>highlighter</span>, regressions get <span className="font-bold" style={{ color: RED }}>red ink</span>, and healthy steps stay quietly set in parchment.
@@ -582,105 +549,38 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ── § 4 — Everything included ── */}
-      <section className="px-6 py-24">
-        <div className="max-w-6xl mx-auto">
-          <SectionHead
-            no="4"
-            kicker="Everything included"
-            title={<>The full stack.<br />No config files.</>}
-          />
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-16">
-            {[
-              ['Learned output contracts', 'Each step’s output shape induced from its own history — required keys, JSON format, enum domains. Proposed, never silently enforced, until you confirm.'],
-              ['Statistical drift baselines', 'Per-step IQR/log-normal fences. Multiplicative outlier detection that survives past spikes — no z-score blind spots.'],
-              ['Confirmation flywheel', 'Confirm anomalies or flag false alarms. Proprietary labels only your production traffic can make — they tune detection now, train the model later.'],
-              ['Warm-start import', 'Pull Langfuse or LangSmith history and build baselines from real traffic in minutes. Backdated, deduped, alert-suppressed. Signal on day one.'],
-              ['AI root-cause analysis', 'One click runs claude-sonnet over an entire run — every step, every score — and tells you what broke and why.'],
-              ['Step identity & profiles', 'System prompts embedded locally. Each step gets a stable semantic profile that survives renames and rewrites. Baselines are per-step, not project-wide.'],
-              ['Slack + Sentry, out of the box', 'Errors, rate spikes, and anomalies to your channel. Every call as a performance transaction, anomalies as fingerprinted issues.'],
-              ['Per-step cost & token tracking', 'Every call captured — tokens, latency, cost, model. Per-run Gantt waterfall. Monthly budget alerts.'],
-            ].map(([title, desc], i) => (
-              <Reveal key={title as string} delay={(i % 2) * 80}>
-                <div className="py-6 border-b border-[#3a2f4e] flex gap-4">
-                  <span className="f-type text-[11px] font-bold pt-1.5 shrink-0" style={{ color: VIOLET }}>{String(i + 1).padStart(2, '0')}</span>
-                  <div>
-                    <div className="f-news font-bold text-[19px] text-[#e9e4f0] mb-1.5">{title}</div>
-                    <div className="f-news text-[15px] text-[#c9c2d6] leading-7">{desc}</div>
-                  </div>
-                </div>
-              </Reveal>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── § 5 — Works with your stack ── */}
+      {/* ── § 4 — Works with your stack (condensed) ── */}
       <section id="stack" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
           <SectionHead
-            no="5"
+            no="4"
             kicker="Works with your stack"
             title={<>Keep your stack.<br />Add detection.</>}
             aside="Traces in from what you already run. Alerts out to where you already look. Cernova sits on top — it doesn't replace anything."
           />
-          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 border-2 border-[#e9e4f0] bg-[#281f38]">
             {([
-              ['Anthropic SDK', 'traces in', 'in'], ['OpenAI SDK', 'traces in', 'in'],
-              ['LangChain', 'any provider', 'in'], ['OpenTelemetry', 'genai ingest', 'in'],
-              ['Vercel AI SDK', 'telemetry', 'in'], ['Langfuse', 'warm-start import', 'in'],
-              ['LangSmith', 'warm-start import', 'in'],
-              ['Slack', 'alerts out', 'out'], ['Sentry', 'issues + traces', 'out'],
-              ['Webhooks', 'signed events', 'out'], ['Read API', 'pull traces + anomalies', 'out'],
-            ] as [string, string, string][]).map(([name, sub, dir], i) => (
-              <Reveal key={name} delay={(i % 5) * 70}>
-                <div className="relative border border-[#e9e4f0] bg-[#281f38] p-5 h-full hover:shadow-[4px_4px_0_#e9e4f0] hover:-translate-x-[2px] hover:-translate-y-[2px] transition-all duration-150">
-                  <span className="absolute -top-2.5 right-3 rotate-[4deg] border-2 border-[#b794f4] text-[#b794f4] f-type text-[9px] font-bold uppercase tracking-[0.18em] px-1.5 py-0.5 bg-[#281f38]">Live</span>
-                  <div className="f-type text-[9px] uppercase tracking-[0.2em] text-[#9a91ad] mb-2">{dir === 'in' ? '→ in' : 'out →'}</div>
-                  <div className="f-news font-bold text-[17px] text-[#e9e4f0] mb-0.5">{name}</div>
-                  <div className="f-type text-[11px] text-[#9a91ad]">{sub}</div>
-                </div>
-              </Reveal>
+              ['Traces in', ['Anthropic SDK', 'OpenAI SDK', 'LangChain', 'OpenTelemetry', 'Vercel AI SDK', 'Langfuse & LangSmith import']],
+              ['Alerts out', ['Slack', 'Sentry', 'Signed webhooks']],
+              ['Data out', ['Read API', 'Pull traces & anomalies']],
+            ] as [string, string[]][]).map(([group, items], i) => (
+              <div key={group} className={['p-8 border-[#e9e4f0]', i < 2 ? 'border-b md:border-b-0 md:border-r' : ''].join(' ')}>
+                <Reveal delay={i * 100}>
+                  <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#b794f4] mb-5">{group}</div>
+                  <ul className="space-y-2.5">
+                    {items.map(name => (
+                      <li key={name} className="f-news text-[17px] text-[#e9e4f0] leading-6">{name}</li>
+                    ))}
+                  </ul>
+                </Reveal>
+              </div>
             ))}
           </div>
-        </div>
-      </section>
-
-      {/* ── Appendix A — Setup ── */}
-      <section className="px-6 py-24">
-        <div className="max-w-6xl mx-auto">
-          <SectionHead
-            no="6"
-            kicker="Appendix A — Setup"
-            title={<>Three steps.<br />Under five minutes.</>}
-            aside="Or skip the wait — import your Langfuse or LangSmith history and start with warm baselines."
-          />
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              { n: 'Step 1', title: 'Install', code: 'npm install @cernova/sdk' },
-              { n: 'Step 2', title: 'Wrap your client', code: `const tracer = new Tracer({ apiKey })
-const anthropic = tracer.wrapAnthropic(
-  new Anthropic()
-)` },
-              { n: 'Step 3', title: 'Use normally', code: `await anthropic.messages.create({
-  model: 'claude-haiku-4-5-20251001',
-  messages: [...],
-  _trace: { stepName: 'classify' },
-})` },
-            ].map((s, i) => (
-              <Reveal key={s.n} delay={i * 110}>
-                <div className="f-type text-[11px] font-bold uppercase tracking-[0.2em] mb-2" style={{ color: VIOLET }}>{s.n}</div>
-                <div className="f-news font-bold text-2xl text-[#e9e4f0] mb-4">{s.title}</div>
-                <div className="border-2 border-[#e9e4f0] bg-[#281f38]">
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-[#e9e4f0]">
-                    <span className="f-type text-[10px] uppercase tracking-[0.16em] text-[#9a91ad]">typescript</span>
-                    <CopyBtn text={s.code} />
-                  </div>
-                  <pre className="px-4 py-4 f-type text-[12px] text-[#e9e4f0] whitespace-pre leading-6 overflow-x-auto">{s.code}</pre>
-                </div>
-              </Reveal>
-            ))}
-          </div>
+          <Reveal>
+            <div className="mt-8 flex justify-center">
+              <Link href="/docs" className="f-type text-[12px] font-bold uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#b794f4] decoration-2 underline-offset-4 hover:text-[#b794f4] transition-colors">See every integration &amp; two-line setup in the docs →</Link>
+            </div>
+          </Reveal>
         </div>
       </section>
 
@@ -703,7 +603,8 @@ const anthropic = tracer.wrapAnthropic(
       <footer className="border-t-2 border-[#e9e4f0] py-8 px-6 bg-[#332946]">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <Link href="/" className="flex items-center gap-2.5 f-news font-bold text-lg text-[#e9e4f0]">
-            <CrystalMark size={14} />
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="" width={18} height={18} className="shrink-0" />
             Cernova
           </Link>
           <p className="f-type text-[10px] uppercase tracking-[0.18em] text-[#9a91ad]">Set in Newsreader & Courier Prime · printed continuously</p>
@@ -713,6 +614,8 @@ const anthropic = tracer.wrapAnthropic(
           </div>
         </div>
       </footer>
+
+      </div>
     </div>
   )
 }
