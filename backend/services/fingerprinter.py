@@ -22,6 +22,27 @@ log = logging.getLogger(__name__)
 MATCH_THRESHOLD  = 0.92
 EVOLVED_THRESHOLD = 0.75
 
+
+def _classify_role(embedding: list[float]) -> tuple[str, str] | None:
+    """Best-effort role classification for a step profile.
+
+    Returns (role, variance) for a confident prediction, else None. Logs the
+    outcome either way — including declines — so a silent skip is never
+    ambiguous. Never raises: role is optional metadata and must not break ingest.
+    """
+    try:
+        from services.step_classifier import classify_role
+        pred = classify_role(embedding)
+        if pred.role:
+            log.info(f"[step-classifier] role={pred.role} variance={pred.variance} "
+                     f"conf={pred.confidence:.2f}")
+            return pred.role, pred.variance
+        log.info(f"[step-classifier] declined (top conf={pred.confidence:.2f}) — role left unchanged")
+        return None
+    except Exception:
+        log.error("[step-classifier] classification failed", exc_info=True)
+        return None
+
 # Model is loaded once and reused — ~80MB, loads in ~1s on first call
 @lru_cache(maxsize=1)
 def _get_model():
@@ -82,6 +103,14 @@ def match_or_create_profile(
             if status == "evolved":
                 updates["last_evolved_at"] = "now()"
                 log.info(f"[fingerprint] step evolved: {step_name} similarity={similarity:.3f} — baseline reset")
+                # The prompt changed enough to reset the baseline, so the step's
+                # role may have changed too — re-classify. Only a confident
+                # prediction overwrites; a decline leaves the existing role intact
+                # (upgrade on confidence, never downgrade to null). Folded into the
+                # update above, so no extra query.
+                rv = _classify_role(embedding)
+                if rv:
+                    updates["role"], updates["variance_tolerance"] = rv
 
             db.table("step_profiles").update(updates).eq("id", profile_id).execute()
             return profile_id, status
@@ -99,21 +128,14 @@ def match_or_create_profile(
         profile_id = res.data[0]["id"]
         log.info(f"[fingerprint] new step profile: {display_name} id={profile_id}")
 
-        # Classify the step's role once, here, reusing the embedding we already
-        # computed (zero extra embed). Best-effort: a missing artifact, an
-        # unconfident prediction, or a missing column never breaks ingest — the
-        # profile is created either way and the engine falls back to defaults.
-        try:
-            from services.step_classifier import classify_role
-            pred = classify_role(embedding)
-            if pred.role:
-                db.table("step_profiles").update(
-                    {"role": pred.role, "variance_tolerance": pred.variance}
-                ).eq("id", profile_id).execute()
-                log.info(f"[step-classifier] profile={profile_id} role={pred.role} "
-                         f"variance={pred.variance} conf={pred.confidence:.2f}")
-        except Exception:
-            log.error(f"[step-classifier] classify/store failed for profile={profile_id}", exc_info=True)
+        # Classify the step's role once, reusing the embedding we already computed
+        # (zero extra embed). Best-effort — the profile exists regardless, and the
+        # engine falls back to defaults when the role is unset.
+        rv = _classify_role(embedding)
+        if rv:
+            db.table("step_profiles").update(
+                {"role": rv[0], "variance_tolerance": rv[1]}
+            ).eq("id", profile_id).execute()
 
         return profile_id, "new"
 

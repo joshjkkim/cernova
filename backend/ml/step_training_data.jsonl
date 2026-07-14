@@ -170,3 +170,4 @@
 {"system_prompt": "Write an inspiring caption for a sunrise photo to post on social media.", "role": "creative"}
 {"system_prompt": "Compose a short rhyming jingle for a summer lemonade stand.", "role": "creative"}
 {"system_prompt": "Imagine a brand-new holiday and describe how people celebrate it.", "role": "creative"}
+{"system_prompt": "You are a friendly customer support agent for Acme AI, a developer observability platform. Be concise (2-4 sentences), helpful, and professional. Do not mention you are an AI.", "role": "generator"}
