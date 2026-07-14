@@ -98,6 +98,23 @@ def match_or_create_profile(
 
         profile_id = res.data[0]["id"]
         log.info(f"[fingerprint] new step profile: {display_name} id={profile_id}")
+
+        # Classify the step's role once, here, reusing the embedding we already
+        # computed (zero extra embed). Best-effort: a missing artifact, an
+        # unconfident prediction, or a missing column never breaks ingest — the
+        # profile is created either way and the engine falls back to defaults.
+        try:
+            from services.step_classifier import classify_role
+            pred = classify_role(embedding)
+            if pred.role:
+                db.table("step_profiles").update(
+                    {"role": pred.role, "variance_tolerance": pred.variance}
+                ).eq("id", profile_id).execute()
+                log.info(f"[step-classifier] profile={profile_id} role={pred.role} "
+                         f"variance={pred.variance} conf={pred.confidence:.2f}")
+        except Exception:
+            log.error(f"[step-classifier] classify/store failed for profile={profile_id}", exc_info=True)
+
         return profile_id, "new"
 
     except Exception:

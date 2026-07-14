@@ -75,18 +75,24 @@ def _stat(values: list[float], log_transform: bool = True) -> MetricStat | None:
 def compute_baseline(step_profile_id: str, model: str | None = None) -> StepBaseline | None:
     """Return a StepBaseline for the given profile, or None if not enough data."""
     try:
-        # Rule 2: find the evolution cutoff timestamp for this profile
+        # Rule 2: find the evolution cutoff timestamp for this profile.
+        # Also read variance_tolerance here (same row) so ingest can size the
+        # fence width k without a second query. Both degrade to None if the
+        # column doesn't exist yet (migration not run).
         last_evolved_at: str | None = None
+        variance_tolerance: str | None = None
         try:
             prof = (
                 get_client()
                 .table("step_profiles")
-                .select("last_evolved_at")
+                .select("last_evolved_at,variance_tolerance")
                 .eq("id", step_profile_id)
                 .single()
                 .execute()
             )
-            last_evolved_at = prof.data.get("last_evolved_at") if prof.data else None
+            if prof.data:
+                last_evolved_at = prof.data.get("last_evolved_at")
+                variance_tolerance = prof.data.get("variance_tolerance")
         except Exception:
             pass
 
@@ -127,6 +133,7 @@ def compute_baseline(step_profile_id: str, model: str | None = None) -> StepBase
             total_tokens=_stat(total_tokens),
             output_tokens=_stat(output_tokens),
             cost=_stat(costs),
+            variance_tolerance=variance_tolerance,
         )
     except Exception:
         log.error(f"[baseline] failed for profile={step_profile_id}", exc_info=True)

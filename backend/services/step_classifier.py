@@ -36,6 +36,23 @@ ROLE_VARIANCE: dict[str, str] = {
     "creative":  "high",
 }
 
+# variance_tolerance -> Tukey fence multiplier k (EvalConfig.iqr_fence_k). A
+# tighter fence (low k) flags smaller deviations, right for near-deterministic
+# steps; a wide fence (high k) tolerates the natural swing of creative steps.
+# DEFAULT_K matches EvalConfig.iqr_fence_k's default — used when a step is
+# unclassified (variance is None), so behaviour is unchanged until a role exists.
+DEFAULT_K = 2.5
+K_BY_VARIANCE: dict[str, float] = {"low": 2.0, "medium": 2.5, "high": 3.5}
+
+
+def k_for_variance(variance: str | None) -> float:
+    """Resolve the Tukey fence multiplier for a step's variance tolerance.
+
+    Unknown or missing variance -> DEFAULT_K, so an unclassified step keeps the
+    engine's current default fence.
+    """
+    return K_BY_VARIANCE.get(variance or "", DEFAULT_K)
+
 
 class RolePrediction(NamedTuple):
     role: str | None

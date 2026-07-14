@@ -113,6 +113,11 @@ class StepBaseline(BaseModel):
     output_tokens: MetricStat | None = None
     cost: MetricStat | None = None
 
+    # The step's variance tolerance (from the role classifier), carried here so
+    # the ingest pipeline can set the fence width k without a second DB read —
+    # compute_baseline already fetches the profile row. None = unclassified.
+    variance_tolerance: str | None = None
+
 
 class EvalHit(BaseModel):
     """One fired condition. Only bad rules produce hits — clean calls have none."""

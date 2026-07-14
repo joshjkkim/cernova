@@ -291,13 +291,19 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                     scope = f"profile={step_profile_id}" if step_profile_id else "project-wide"
                     log.info(f"[anomaly] dynamic L4 limits ({scope}): {dynamic}")
 
-        # L5: inject per-step statistical baseline when available
+        # L5: inject per-step statistical baseline when available. Size the Tukey
+        # fence to the step's role-derived variance tolerance (carried on the
+        # baseline) — tighter for deterministic steps, wider for creative ones.
+        # Unclassified steps resolve to DEFAULT_K, so behaviour is unchanged.
         if step_profile_id:
             from services.baseline_service import compute_baseline
             baseline = compute_baseline(step_profile_id, model=payload.model)
             if baseline:
-                config = EvalConfig(**{**config.model_dump(), "baseline": baseline})
-                log.info(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
+                from services.step_classifier import k_for_variance
+                k = k_for_variance(baseline.variance_tolerance)
+                config = EvalConfig(**{**config.model_dump(), "baseline": baseline, "iqr_fence_k": k})
+                log.info(f"[anomaly] L5 baseline for profile={step_profile_id}: "
+                         f"n={baseline.sample_count} k={k} (variance={baseline.variance_tolerance})")
         # Load the step's learned contract up front. An *enforced* contract is the
         # source of truth for output shape, so the regex output_format layer defers
         # its JSON checks (2001/2002) to it — the contract's format_not_json (2010)
