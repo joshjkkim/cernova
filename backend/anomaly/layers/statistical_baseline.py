@@ -5,7 +5,7 @@ right-skewed (log-normal in practice), so z-scores against mean/std are badly
 calibrated: the long tail inflates std, making true spikes look like 2σ events
 when they're really 10× outliers.
 
-Detection is now via the Tukey fence in log space:
+Detection is via the Tukey fence in log space:
   anomalous  iff  log(x) > log(Q3) + k * log_IQR
                   log(x) < log(Q1) - k * log_IQR
 
@@ -14,7 +14,9 @@ IQR-widths (in log space) the value sits outside the fence — analogous to σ b
 distribution-free. A deviation of 0 means right at the fence; 1.0 means one full
 IQR-width beyond it.
 
-Fires when a baseline exists and deviation > 0:
+Which signals are scored — and their transform, anomalous tail, and score-vs-
+trigger behaviour — is declared once in anomaly/scalars.py, not hardcoded here.
+The four scalars scored today:
   5001  latency_ms
   5002  total_tokens
   5003  cost
@@ -27,6 +29,7 @@ from __future__ import annotations
 
 from ..condition_registry import describe
 from ..config import EvalConfig
+from ..scalars import SCALAR_SPECS, ScalarSpec
 from ..schemas import CallInput, EvalHit, MetricStat
 
 
@@ -38,8 +41,8 @@ def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[Eva
     hits: list[EvalHit] = []
     k = config.iqr_fence_k
 
-    def fire(code: int, deviation: float, observed: float, stat: MetricStat) -> None:
-        cond      = describe(code)
+    def fire(spec: ScalarSpec, deviation: float, observed: float, stat: MetricStat) -> None:
+        cond      = describe(spec.code)
         direction = "above upper fence" if deviation > 0 else "below lower fence"
         if stat.log_transform and stat.log_q1 is not None:
             fence_desc = (
@@ -65,16 +68,27 @@ def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[Eva
             expected=fence_desc,
         ))
 
-    def check(code: int, stat: MetricStat | None, observed: float | None) -> None:
+    for spec in SCALAR_SPECS:
+        stat: MetricStat | None = getattr(baseline, spec.key, None)
+        observed = getattr(payload, spec.key, None)
         if stat is None or observed is None:
-            return
-        deviation = stat.iqr_deviation(observed, k=k)
-        if deviation is not None:
-            fire(code, deviation, observed, stat)
+            continue
 
-    check(5001, baseline.latency_ms,    payload.latency_ms)
-    check(5002, baseline.total_tokens,  payload.total_tokens)
-    check(5003, baseline.cost,          payload.cost)
-    check(5004, baseline.output_tokens, payload.output_tokens)
+        deviation = stat.iqr_deviation(observed, k=k)
+        if deviation is None:
+            continue
+
+        # Tail gate: only fire on the side this scalar treats as anomalous.
+        if spec.tail == "upper" and deviation < 0:
+            continue
+        if spec.tail == "lower" and deviation > 0:
+            continue
+
+        # trigger-only scalars flag the call for escalation elsewhere (e.g. an
+        # LLM judge) rather than contributing a penalty here. None today.
+        if spec.action != "score":
+            continue
+
+        fire(spec, deviation, observed, stat)
 
     return hits
