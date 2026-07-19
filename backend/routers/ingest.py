@@ -299,6 +299,22 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
             from services.baseline_service import compute_baseline
             baseline = compute_baseline(step_profile_id, model=payload.model)
             if baseline:
+                # L1 perception: forward-model semantic surprise — "is this
+                # output what this step produces for this input?" Role-gated and
+                # cached inside the service; None just means 5010 doesn't score.
+                # Attached only when a baseline exists so numeric_thresholds'
+                # defer-to-baseline behaviour is untouched.
+                try:
+                    from services.forward_model_service import score_surprise
+                    scored = score_surprise(step_profile_id, payload.raw_prompt, payload.output_text)
+                    if scored:
+                        call_input.semantic_surprise = scored[0]
+                        baseline.semantic_surprise = scored[1]
+                        log.info(f"[anomaly] L1 surprise for profile={step_profile_id}: "
+                                 f"{scored[0]:.3f} (fence q3={scored[1].q3:.3f})")
+                except Exception:
+                    log.error(f"[forward-model] attach failed profile={step_profile_id}", exc_info=True)
+
                 from services.step_classifier import k_for_variance
                 k = k_for_variance(baseline.variance_tolerance)
                 config = EvalConfig(**{**config.model_dump(), "baseline": baseline, "iqr_fence_k": k})
@@ -395,6 +411,31 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
                 if webhook_level == "warning" or result.triggered:
                     from services.webhook_service import send_anomaly_webhook
                     send_anomaly_webhook(out_webhook, project.get("webhook_secret"), payload, result, project)
+
+            # Systemic-incident detection — is this a one-off or a macro trend?
+            # For each fired code, check whether the same (step, code) is now
+            # hitting many runs at once. An incident fires ONE high-severity alert
+            # (deduped in systemic_service), so it cuts noise rather than adding.
+            if not suppress_alerts and project and project.get("systemic_enabled", True):
+                from services.systemic_service import maybe_open_incident, WINDOW_MIN, MIN_RUNS
+                window_min = project.get("systemic_window_min") or WINDOW_MIN
+                min_runs   = project.get("systemic_min_runs") or MIN_RUNS
+                for code in result.error_map:
+                    incident = maybe_open_incident(project["id"], payload.step_name, code,
+                                                   window_min=window_min, min_runs=min_runs)
+                    if not incident:
+                        continue
+                    from anomaly import CONDITION_REGISTRY
+                    cond_name = CONDITION_REGISTRY[code].name if code in CONDITION_REGISTRY else ""
+                    if out_webhook:
+                        from services.webhook_service import send_systemic_webhook
+                        send_systemic_webhook(out_webhook, project.get("webhook_secret"), incident, project)
+                    slack_hook = project.get("slack_webhook_url")
+                    if slack_hook:
+                        from services.slack_service import send_systemic_alert
+                        send_systemic_alert(slack_hook, project.get("name", "unknown"), project["id"],
+                                            payload.step_name, cond_name, code,
+                                            incident.run_count, incident.window_min)
     except Exception:
         log.error(f"[ingest] anomaly detection failed for run {payload.run_id}", exc_info=True)
 

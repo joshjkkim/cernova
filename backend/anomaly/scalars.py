@@ -49,4 +49,8 @@ SCALAR_SPECS: list[ScalarSpec] = [
     ScalarSpec("total_tokens",  5002, "log", "both"),
     ScalarSpec("cost",          5003, "log", "both"),
     ScalarSpec("output_tokens", 5004, "log", "both"),
+    # L1 perception: forward-model surprise (1 - cos of predicted vs actual
+    # output embedding). Bounded ~[0, 2] so raw, not log; only HIGH surprise is
+    # anomalous — an output that lands unusually close to prediction is fine.
+    ScalarSpec("semantic_surprise", 5010, "raw", "upper"),
 ]

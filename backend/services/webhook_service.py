@@ -86,6 +86,29 @@ def send_anomaly_webhook(url: str, secret: str | None, payload, result, project:
     return _deliver(url, secret, build_anomaly_event(payload, result, project))
 
 
+def build_systemic_event(incident, project: dict) -> dict:
+    """Assemble a systemic-incident WebhookEvent from an open Incident."""
+    name = CONDITION_REGISTRY[incident.error_code].name if incident.error_code in CONDITION_REGISTRY else ""
+    event = WebhookEvent(
+        type="systemic_incident",
+        event_id=str(uuid.uuid4()),
+        timestamp=datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        project_id=str(project.get("id", "")),
+        project_name=project.get("name", "unknown"),
+        step_name=incident.step_name,
+        triggered=True,  # a systemic incident is, by definition, a fired event
+        codes=[WebhookCode(code=incident.error_code, name=name, penalty=0.0)],
+        run_count=incident.run_count,
+        window_minutes=incident.window_min,
+    )
+    return event.model_dump()
+
+
+def send_systemic_webhook(url: str, secret: str | None, incident, project: dict) -> bool:
+    """Build and deliver a systemic-incident event. Returns True on 2xx."""
+    return _deliver(url, secret, build_systemic_event(incident, project))
+
+
 def send_test_webhook(url: str, secret: str | None, project_name: str) -> bool:
     """Deliver a synthetic event so a user can confirm their endpoint receives it."""
     event = WebhookEvent(

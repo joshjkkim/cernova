@@ -21,15 +21,20 @@ class WebhookCode(BaseModel):
 
 class WebhookEvent(BaseModel):
     schema_version: int = WEBHOOK_SCHEMA_VERSION
-    type: str = "anomaly"          # future: contract_proposed | drift
+    type: str = "anomaly"          # anomaly | systemic_incident | test | future: contract_proposed | drift
     event_id: str
     timestamp: str                 # ISO 8601, UTC
     project_id: str
     project_name: str
-    run_id: str
+    run_id: str = ""               # a single call for 'anomaly'; empty for aggregate 'systemic_incident'
     step_name: str | None = None
     model: str | None = None
     total_score: float = 0.0
     threshold: float = 0.0
     triggered: bool = False
     codes: list[WebhookCode] = Field(default_factory=list)
+
+    # Populated for type == 'systemic_incident' only: how many distinct runs hit
+    # the same condition, and over what window. None for per-call events.
+    run_count: int | None = None
+    window_minutes: int | None = None

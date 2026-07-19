@@ -30,6 +30,9 @@ interface Project {
   webhook_url?: string | null;
   webhook_secret?: string | null;
   webhook_anomaly_level?: string | null;
+  systemic_enabled?: boolean;
+  systemic_window_min?: number | null;
+  systemic_min_runs?: number | null;
 }
 
 interface Call {
@@ -126,6 +129,18 @@ interface AnomalyRun {
   is_critical: boolean;
   steps: { step_name: string; codes: { code: number; score: number }[] }[];
   latest_at: string;
+}
+
+// A systemic incident: the same condition hit many runs at once (backend
+// services/systemic_service). The macro-scale sibling of a per-run anomaly.
+interface Incident {
+  id: number;
+  step_name: string | null;
+  error_code: number;
+  run_count: number;
+  window_min: number;
+  status: string;
+  opened_at: string;
 }
 
 const ANOMALY_THRESHOLD = 100;
@@ -232,6 +247,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [runsQuery, setRunsQuery]         = useState('');
   const [stepHealth, setStepHealth]       = useState<StepHealthRow[]>([]);
   const [contracts, setContracts]         = useState<ContractRow[]>([]);
+  const [incidents, setIncidents]         = useState<Incident[]>([]);
 
   const runs = useMemo(() => groupIntoRuns(calls), [calls]);
   const selectedRun = useMemo(() => runs.find((r) => r.runId === selectedRunId) ?? null, [runs, selectedRunId]);
@@ -270,16 +286,18 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
       const proj: Project = await res.json();
       setProject(proj);
 
-      const [callsRes, anomaliesRes, registryRes, healthRes] = await Promise.all([
+      const [callsRes, anomaliesRes, registryRes, healthRes, incidentsRes] = await Promise.all([
         authFetch(`${BACKEND}/calls/project/${projectId}`),
         authFetch(`${BACKEND}/anomalies/project/${proj.id}`),
         authFetch(`${BACKEND}/anomalies/registry`),
         authFetch(`${BACKEND}/projects/${proj.id}/step-health`),
+        authFetch(`${BACKEND}/incidents/project/${proj.id}`),
       ]);
       if (callsRes.ok) setCalls((await callsRes.json() as Call[]).slice().reverse());
       if (anomaliesRes.ok) setAnomalies(await anomaliesRes.json() as AnomalyRow[]);
       if (registryRes.ok) setConditionRegistry(await registryRes.json() as ConditionRegistry);
       if (healthRes.ok) setStepHealth(await healthRes.json() as StepHealthRow[]);
+      if (incidentsRes.ok) setIncidents(await incidentsRes.json() as Incident[]);
 
       // Contracts are API-key authed (same endpoint the SDK/CLI uses).
       const contractsRes = await fetch(`${BACKEND}/contracts`, {
@@ -343,7 +361,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     { id: 'overview',  label: 'overview' },
     { id: 'logs',      label: 'logs' },
     { id: 'runs',      label: `runs${runs.length ? ` (${runs.length})` : ''}` },
-    { id: 'anomalies', label: `anomalies${criticalCount ? ` (${criticalCount} critical)` : anomalyRuns.length ? ` (${anomalyRuns.length})` : ''}` },
+    { id: 'anomalies', label: `detections${incidents.length ? ` (${incidents.length} incident${incidents.length > 1 ? 's' : ''})` : criticalCount ? ` (${criticalCount} critical)` : anomalyRuns.length ? ` (${anomalyRuns.length})` : ''}` },
     { id: 'steps',     label: `steps${degradingCount ? ` (${degradingCount} drifting)` : ''}` },
     { id: 'contracts', label: `contracts${proposedCount ? ` (${proposedCount} new)` : ''}` },
     { id: 'usage',     label: 'usage' },
@@ -476,7 +494,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
           </div>
         )}
 
-        {tab === 'anomalies' && <AnomaliesTab runs={anomalyRuns} registry={conditionRegistry} />}
+        {tab === 'anomalies' && <DetectionsTab incidents={incidents} anomalies={anomalies} runs={anomalyRuns} registry={conditionRegistry} />}
         {tab === 'steps'     && <StepsHealthTab health={stepHealth} />}
         {tab === 'contracts' && <ContractsTab contracts={contracts} apiKey={project.API_KEY} onUpdate={(id, status) => setContracts(cs => cs.map(c => c.step_profile_id === id ? { ...c, status } : c))} />}
         {tab === 'usage'     && <UsageTab project={project} />}
@@ -492,6 +510,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
             const ar = anomalyMap.get(selectedCall.run_id ?? '');
             return ar?.steps.find(s => s.step_name === selectedCall.step_name);
           })()}
+          runCritical={anomalyMap.get(selectedCall.run_id ?? '')?.is_critical ?? false}
           registry={conditionRegistry}
         />
       )}
@@ -744,6 +763,10 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
 }) {
   if (!steps.length) return null;
 
+  // Severity is a run-level verdict: red only when the run crossed the threshold,
+  // so the detail never contradicts the list badge.
+  const runCritical = anomalyRun?.is_critical ?? false;
+
   function fmtMs(ms: number) {
     return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
   }
@@ -774,7 +797,7 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
         const widthPct  = Math.max(((endMs - startMs) / totalMs) * 100, 1.5);
 
         const barColor = isError ? 'bg-[#e0533d]'
-          : stepScore >= 50 ? 'bg-[#e0533d]/70'
+          : (anomalyStep && runCritical) ? 'bg-[#e0533d]/70'
           : anomalyStep    ? 'bg-[#d9c964]/80'
           : 'bg-[#b794f4]';
 
@@ -824,7 +847,7 @@ function RunTimeline({ steps, anomalyRun, registry, onSelect }: {
                   title={info?.description}
                   className={[
                     'inline-flex items-center gap-1 font-mono text-[10px] px-1.5 py-0.5 border',
-                    score >= 50
+                    runCritical
                       ? 'border-[#e0533d]/50 text-[#e0533d]'
                       : 'border-[#d9c964]/40 text-[#d9c964]',
                   ].join(' ')}
@@ -851,10 +874,11 @@ interface ParsedPrompt {
 
 type AnomalyStep = AnomalyRun['steps'][number];
 
-function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
+function CallDetailDrawer({ call, onClose, anomalyStep, runCritical, registry }: {
   call: Call;
   onClose: () => void;
   anomalyStep?: AnomalyStep;
+  runCritical?: boolean;
   registry?: ConditionRegistry;
 }) {
   const isError = call.status_success === false;
@@ -951,7 +975,7 @@ function CallDetailDrawer({ call, onClose, anomalyStep, registry }: {
               <div className="space-y-2">
                 {anomalyStep.codes.map(({ code, score }) => {
                   const info = registry?.[String(code)];
-                  const isCritical = score >= 50;
+                  const isCritical = runCritical ?? false;
                   return (
                     <div
                       key={code}
@@ -1079,6 +1103,126 @@ function AnalysisPanel({ text, costUsd, onClose }: { text: string; costUsd: numb
   );
 }
 
+// ── Detections tab (incidents · frequency · anomaly feed) ─────────────────────
+
+function anomalyFreqBuckets(rows: AnomalyRow[], bucketCount: number, hours: number) {
+  const now = Date.now();
+  const windowMs = hours * 3600_000;
+  const bucketMs = windowMs / bucketCount;
+  const start = now - windowMs;
+  const buckets = Array.from({ length: bucketCount }, (_, i) => ({ label: new Date(start + i * bucketMs), count: 0 }));
+  for (const r of rows) {
+    if (!r.created_at) continue;
+    const idx = Math.floor((new Date(r.created_at).getTime() - start) / bucketMs);
+    if (idx >= 0 && idx < bucketCount) buckets[idx].count++;
+  }
+  return buckets;
+}
+
+// Single-series frequency bars (brand purple = volume, consistent with Overview).
+// Severity lives in the incident cards, not the bar colour — status colour is
+// never used for a plain magnitude series.
+function FreqBars({ buckets }: { buckets: { label: Date; count: number }[] }) {
+  const max = Math.max(...buckets.map(b => b.count), 1);
+  return (
+    <div className="flex items-end gap-px h-24">
+      {buckets.map((b, i) => (
+        <div
+          key={i}
+          title={`${b.count} ${b.count === 1 ? 'anomaly' : 'anomalies'} · ${b.label.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`}
+          className="flex-1 bg-[#b794f4] opacity-80 hover:opacity-100 transition-all"
+          style={{ height: `${(b.count / max) * 100}%`, minHeight: b.count > 0 ? '2px' : '0' }}
+        />
+      ))}
+    </div>
+  );
+}
+
+function DetectionsTab({ incidents, anomalies, runs, registry }: {
+  incidents: Incident[];
+  anomalies: AnomalyRow[];
+  runs: AnomalyRun[];
+  registry: ConditionRegistry;
+}) {
+  const [range, setRange] = useState<TimeRange>('24h');
+  const cfg = RANGES[range];
+  const buckets = useMemo(() => {
+    const cutoff = Date.now() - cfg.hours * 3600_000;
+    const inWindow = anomalies.filter(a => a.created_at && new Date(a.created_at).getTime() >= cutoff);
+    return anomalyFreqBuckets(inWindow, cfg.buckets, cfg.hours);
+  }, [anomalies, cfg]);
+  const rangeOptions = (Object.keys(RANGES) as TimeRange[]).map(r => ({ value: r, label: RANGES[r].label }));
+  const criticalCount = runs.filter(r => r.is_critical).length;
+  const openIncidents = incidents.filter(i => i.status === 'open');
+
+  return (
+    <div className="space-y-6">
+      {/* Stat row — the technical-dashboard header */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-[#3a2f4e]">
+        <StatCard label="Open incidents" value={openIncidents.length.toString()} alert={openIncidents.length > 0} />
+        <StatCard label="Anomaly runs"   value={runs.length.toString()} />
+        <StatCard label="Critical"       value={criticalCount.toString()} alert={criticalCount > 0} />
+        <StatCard label="Conditions"     value={anomalies.length.toString()} />
+      </div>
+
+      {/* Incidents — the macro/systemic signal, hero of the tab */}
+      <div>
+        <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-3">Systemic incidents</p>
+        {openIncidents.length === 0 ? (
+          <div className="border-l-2 border-[#3a2f4e] pl-4 py-2">
+            <p className="font-mono text-[11px] text-[#7c7291]">
+              No systemic incidents — failures are isolated, not hitting many runs at once.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {openIncidents.map((inc) => {
+              const name = registry[String(inc.error_code)]?.name ?? `code_${inc.error_code}`;
+              return (
+                <div key={inc.id} className="border-l-2 border-[#e0533d] bg-[#281f38] border-y border-r border-[#3a2f4e] px-4 py-3">
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="min-w-0">
+                      <p className="font-sans text-sm text-[#e9e4f0]">
+                        <span className="text-[#e0533d]">🚨</span>{' '}
+                        <span className="font-black text-[#e0533d]">{inc.run_count} runs</span>{' '}
+                        of <code className="font-mono text-[12px] text-[#c4a6f2]">{inc.step_name ?? '—'}</code>{' '}
+                        hit <span className="font-mono text-[12px] text-[#e6d77f]">{name}</span>
+                      </p>
+                      <p className="font-mono text-[10px] text-[#7c7291] mt-1">
+                        {inc.run_count} distinct runs within {inc.window_min} min · code {inc.error_code}
+                      </p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <Badge variant="critical">incident</Badge>
+                      <p className="font-mono text-[10px] text-[#7c7291] mt-1.5">{new Date(inc.opened_at).toLocaleString()}</p>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Frequency over time — one-off vs. macro trend at a glance */}
+      <div className="bg-[#281f38] border border-[#3a2f4e] p-5">
+        <div className="flex items-center justify-between mb-4 gap-4">
+          <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">Anomaly frequency · {cfg.label}</p>
+          <SegmentedControl options={rangeOptions} value={range} onChange={setRange} />
+        </div>
+        <FreqBars buckets={buckets} />
+        <ChartAxis first={buckets[0]?.label} last={buckets[buckets.length - 1]?.label} />
+      </div>
+
+      {/* Individual anomalies — the per-run drill-down */}
+      <div>
+        <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-3">Individual anomalies</p>
+        <AnomaliesTab runs={runs} registry={registry} />
+      </div>
+    </div>
+  );
+}
+
 // ── Anomalies tab ─────────────────────────────────────────────────────────────
 
 function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: ConditionRegistry }) {
@@ -1150,7 +1294,7 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
                     <div className="space-y-2">
                       {step.codes.map(({ code, score }) => {
                         const info = registry[String(code)];
-                        const isCrit = score >= 50;
+                        const isCrit = run.is_critical;
                         return (
                           <div key={code} className={`border-l-2 pl-4 py-1.5 ${isCrit ? 'border-[#e0533d]' : 'border-[#d9c964]'}`}>
                             <div className="flex items-center gap-2 flex-wrap">
@@ -1698,6 +1842,9 @@ function SettingsTab({ project }: { project: Project }) {
   const [webhookSecret, setWebhookSecret] = useState(project.webhook_secret ?? '');
   const [testingOut, setTestingOut] = useState(false);
   const [thresholdMode, setThresholdMode] = useState<'dynamic' | 'manual'>((project.threshold_mode as 'dynamic' | 'manual') ?? 'dynamic');
+  const [systemicEnabled, setSystemicEnabled] = useState(project.systemic_enabled ?? true);
+  const [systemicWindow, setSystemicWindow]   = useState((project.systemic_window_min ?? 10).toString());
+  const [systemicMinRuns, setSystemicMinRuns] = useState((project.systemic_min_runs ?? 5).toString());
   const [manualLatency, setManualLatency] = useState(project.threshold_latency_ms?.toString() ?? '');
   const [manualTokens, setManualTokens]   = useState(project.threshold_tokens?.toString() ?? '');
   const [manualCost, setManualCost]       = useState(project.threshold_cost?.toString() ?? '');
@@ -1734,6 +1881,9 @@ function SettingsTab({ project }: { project: Project }) {
           monthly_budget_usd: budget ? parseFloat(budget) : null,
           webhook_url: webhookUrl.trim() || null,
           webhook_anomaly_level: webhookLevel,
+          systemic_enabled: systemicEnabled,
+          systemic_window_min: systemicWindow ? parseInt(systemicWindow, 10) : null,
+          systemic_min_runs: systemicMinRuns ? parseInt(systemicMinRuns, 10) : null,
         }),
       });
       if (!res.ok) throw new Error(await res.text());
@@ -1979,6 +2129,39 @@ function SettingsTab({ project }: { project: Project }) {
               ))}
             </div>
           )}
+        </div>
+      </SettingSection>
+
+      <SettingSection
+        title="Systemic incidents"
+        description="Fire one high-severity alert when the same failure hits many runs in a short window — a macro trend, not a one-off."
+      >
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <label className="font-mono text-[11px] text-[#9a91ad]">Detect incidents</label>
+            <Toggle checked={systemicEnabled} onChange={setSystemicEnabled} />
+          </div>
+          <div className={systemicEnabled ? 'space-y-3' : 'space-y-3 opacity-40 pointer-events-none'}>
+            <div className="flex items-center justify-between gap-4">
+              <label className="font-mono text-[11px] text-[#9a91ad] shrink-0">Min runs to trip</label>
+              <input
+                type="number" min="2" step="1" placeholder="5" value={systemicMinRuns}
+                onChange={e => setSystemicMinRuns(e.target.value)}
+                className="w-36 bg-[#201a2b] border border-[#3a2f4e] px-3 py-1.5 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63]"
+              />
+            </div>
+            <div className="flex items-center justify-between gap-4">
+              <label className="font-mono text-[11px] text-[#9a91ad] shrink-0">Window (minutes)</label>
+              <input
+                type="number" min="1" step="1" placeholder="10" value={systemicWindow}
+                onChange={e => setSystemicWindow(e.target.value)}
+                className="w-36 bg-[#201a2b] border border-[#3a2f4e] px-3 py-1.5 font-mono text-xs text-[#c9c2d6] placeholder-[#7c7291] focus:outline-none focus:border-[#4a3d63]"
+              />
+            </div>
+            <p className="font-mono text-[10px] text-[#7c7291] leading-5">
+              e.g. {systemicMinRuns || '5'} distinct runs hitting the same condition within {systemicWindow || '10'} min opens an incident. A higher min suits high-traffic projects.
+            </p>
+          </div>
         </div>
       </SettingSection>
 

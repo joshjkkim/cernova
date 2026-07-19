@@ -31,6 +31,43 @@ def _post(url: str, payload: dict) -> bool:
         return False
 
 
+def send_systemic_alert(
+    webhook_url: str,
+    project_name: str,
+    project_id: str,
+    step_name: str,
+    condition_name: str,
+    error_code: int,
+    run_count: int,
+    window_min: int,
+) -> bool:
+    """A systemic incident: the same condition hit many runs in a short window.
+
+    No per-project cooldown here — the incident record itself already dedups
+    (one alert per incident open / cooldown, in systemic_service).
+    """
+    text = (f"🚨 Systemic incident in {project_name}: {run_count} runs of "
+            f"`{step_name}` hit `{condition_name}` in {window_min} min")
+    blocks = [
+        {"type": "header",
+         "text": {"type": "plain_text", "text": f"🚨 Systemic incident — {step_name}"}},
+        {"type": "section", "fields": [
+            {"type": "mrkdwn", "text": f"*Project*\n{project_name}"},
+            {"type": "mrkdwn", "text": f"*Runs affected*\n`{run_count}` in {window_min} min"},
+            {"type": "mrkdwn", "text": f"*Step*\n`{step_name}`"},
+            {"type": "mrkdwn", "text": f"*Condition*\n`{error_code}` {condition_name}"},
+        ]},
+        {"type": "context", "elements": [
+            {"type": "mrkdwn", "text": "Not a one-off — the same failure is hitting many runs at once."}]},
+        {"type": "actions", "elements": [{
+            "type": "button",
+            "text": {"type": "plain_text", "text": "View project →"},
+            "url": f"{DASHBOARD_BASE}/dashboard/{project_id}",
+        }]},
+    ]
+    return _post(webhook_url, {"text": text, "blocks": blocks})
+
+
 def send_error_alert(
     webhook_url: str,
     project_name: str,

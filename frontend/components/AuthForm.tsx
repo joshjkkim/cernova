@@ -29,6 +29,18 @@ export default function AuthForm() {
   const [info, setInfo]         = useState<string | null>(null);
   const [loading, setLoading]   = useState(false);
 
+  async function handleOAuth(provider: 'github' | 'google') {
+    setError(null);
+    setInfo(null);
+    const origin = window.location.origin;
+    const { error: oauthError } = await supabase.auth.signInWithOAuth({
+      provider,
+      options: { redirectTo: `${origin}/dashboard` },
+    });
+    // On success the browser navigates away; only errors land here.
+    if (oauthError) setError(extractMessage(oauthError));
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
@@ -103,6 +115,34 @@ export default function AuthForm() {
             {m === 'signin' ? 'sign in' : 'sign up'}
           </button>
         ))}
+      </div>
+
+      <div className="p-8 pb-0 space-y-2">
+        <button
+          type="button"
+          onClick={() => handleOAuth('github')}
+          className="w-full flex items-center justify-center gap-2 border border-[#3a2f4e] hover:border-[#4a3d63] bg-[#201a2b] py-2.5 font-mono text-xs text-[#c9c2d6] hover:text-[#e9e4f0] transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+          </svg>
+          continue with GitHub
+        </button>
+        <button
+          type="button"
+          onClick={() => handleOAuth('google')}
+          className="w-full flex items-center justify-center gap-2 border border-[#3a2f4e] hover:border-[#4a3d63] bg-[#201a2b] py-2.5 font-mono text-xs text-[#c9c2d6] hover:text-[#e9e4f0] transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <path d="M12 11v2.4h6.8c-.27 1.77-2.05 5.2-6.8 5.2-4.09 0-7.43-3.39-7.43-7.6S7.91 3.4 12 3.4c2.33 0 3.89.99 4.78 1.85l3.25-3.13C17.95.36 15.24-1 12-1 5.39-1 .04 4.35.04 11S5.39 23 12 23c6.92 0 11.52-4.87 11.52-11.72 0-.79-.09-1.39-.19-1.99L12 11Z" transform="translate(0 1)" />
+          </svg>
+          continue with Google
+        </button>
+        <div className="flex items-center gap-3 pt-2">
+          <div className="flex-1 border-t border-[#3a2f4e]" />
+          <span className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">or</span>
+          <div className="flex-1 border-t border-[#3a2f4e]" />
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="p-8 space-y-4">

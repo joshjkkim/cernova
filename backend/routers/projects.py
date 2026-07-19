@@ -38,6 +38,9 @@ class ProjectResponse(BaseModel):
     webhook_url: Optional[str] = None
     webhook_secret: Optional[str] = None
     webhook_anomaly_level: Optional[str] = 'critical'
+    systemic_enabled: Optional[bool] = True
+    systemic_window_min: Optional[int] = 10
+    systemic_min_runs: Optional[int] = 5
 
 
 class WebhookUpdate(BaseModel):
@@ -55,6 +58,9 @@ class WebhookUpdate(BaseModel):
     monthly_budget_usd: Optional[float] = None
     webhook_url: Optional[str] = None
     webhook_anomaly_level: Optional[str] = None
+    systemic_enabled: Optional[bool] = None
+    systemic_window_min: Optional[int] = None
+    systemic_min_runs: Optional[int] = None
 
 
 class ProjectWithCallsResponse(ProjectResponse):
@@ -165,6 +171,14 @@ def update_webhook(request: Request, project_id: str, body: WebhookUpdate) -> Pr
         updates["webhook_url"] = body.webhook_url
         if body.webhook_anomaly_level is not None:
             updates["webhook_anomaly_level"] = body.webhook_anomaly_level
+
+        # Systemic-incident detector tuning.
+        if body.systemic_enabled is not None:
+            updates["systemic_enabled"] = body.systemic_enabled
+        if body.systemic_window_min is not None:
+            updates["systemic_window_min"] = body.systemic_window_min
+        if body.systemic_min_runs is not None:
+            updates["systemic_min_runs"] = body.systemic_min_runs
         if body.webhook_url:
             existing = client.table("PROJECTS").select("webhook_secret").eq("id", project_id).single().execute()
             if not (existing.data or {}).get("webhook_secret"):

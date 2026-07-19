@@ -69,6 +69,10 @@ def _stat(values: list[float], log_transform: bool = True) -> MetricStat | None:
         log_transform=log_transform,
         q1=q1, median=med, q3=q3, iqr=iqr,
         log_q1=log_q1, log_q3=log_q3, log_iqr=log_iqr,
+        # Conformal calibration set: the clean history itself, sorted. Raw
+        # space — rank decisions are transform-invariant, so log vs raw can't
+        # change the outcome. Presence flips the layer to the conformal path.
+        calibration=s,
     )
 
 

@@ -19,6 +19,7 @@ Token verification reuses the existing Supabase client (`get_client().auth
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import HTTPException, Request
 
@@ -63,6 +64,21 @@ def _check_owner(user: dict, project_id: str) -> dict:
 def require_owner(request: Request, project_id: str) -> dict:
     """Validate the user AND that they own project_id. Returns the project row."""
     return _check_owner(require_user(request), project_id)
+
+
+def require_admin(request: Request) -> dict:
+    """Validate the user AND that their email is listed in ADMIN_EMAILS.
+
+    ADMIN_EMAILS is a comma-separated env var. Fail-closed: unset or empty
+    means nobody is admin — the operator surface cannot be reached by accident
+    on a deployment that never configured it.
+    """
+    user = require_user(request)
+    allowed = {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+    email = (user.get("email") or "").lower()
+    if not email or email not in allowed:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
 
 
 def require_owner_of_run(request: Request, run_id: str) -> dict:

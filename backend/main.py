@@ -6,7 +6,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from db import check_connection
 from logging_config import configure_logging
-from routers import ingest, traces, projects, calls, anomalies, analyze, otel, feedback, imports, read
+from routers import ingest, traces, projects, calls, anomalies, analyze, otel, feedback, imports, read, incidents, admin
 
 configure_logging()
 
@@ -40,6 +40,8 @@ app.include_router(otel.router)
 app.include_router(feedback.router)
 app.include_router(imports.router)
 app.include_router(read.router)
+app.include_router(incidents.router)
+app.include_router(admin.router)
 
 @app.get("/debug-sentry")
 def debug_sentry() -> dict:

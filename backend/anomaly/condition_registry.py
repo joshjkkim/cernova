@@ -203,6 +203,17 @@ _STATISTICAL: list[ConditionDef] = [
         "Output token count falls outside the Tukey fence, independent of input size.",
         "statistical_baseline.run_statistical_baseline:output_tokens_iqr_fence",
     ),
+    # L1 perception — forward-model semantic surprise. Unlike 5001-5004 (raw
+    # metrics from the SDK), the observed value is COMPUTED by the pipeline:
+    # surprise = 1 - cos(g(embed(input)), embed(output)) against the step's own
+    # learned input->output map (services/forward_model_service). Fires when the
+    # output is semantically unlike what this step produces for this input.
+    ConditionDef(
+        5010, "statistical_baseline", "semantic_surprise_fence", 40.0,
+        "Output is semantically unlike what this step normally produces for this input "
+        "(forward-model surprise outside the step's own fence).",
+        "statistical_baseline.run_statistical_baseline:semantic_surprise_fence",
+    ),
 ]
 
 CONDITION_REGISTRY: dict[int, ConditionDef] = {

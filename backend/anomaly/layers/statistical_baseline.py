@@ -1,26 +1,22 @@
-"""Statistical-baseline layer — IQR/log-normal deviation from per-step-profile baseline.
+"""Statistical-baseline layer — per-step-profile deviation from learned history.
 
-Replaces the earlier z-score approach. LLM latency, cost, and token counts are
-right-skewed (log-normal in practice), so z-scores against mean/std are badly
-calibrated: the long tail inflates std, making true spikes look like 2σ events
-when they're really 10× outliers.
+Two decision modes per scalar, chosen by what the MetricStat carries:
 
-Detection is via the Tukey fence in log space:
-  anomalous  iff  log(x) > log(Q3) + k * log_IQR
-                  log(x) < log(Q1) - k * log_IQR
+CONFORMAL (preferred — when stat.calibration is present): the observed value is
+ranked against the step's clean historical values and converted to a split-
+conformal p-value; the scalar fires when p <= max(alpha, p_floor) where
+p_floor = 1/(n+1) (2/(n+1) two-sided) is the smallest p n samples can certify.
+Guarantee: on exchangeable (normal) traffic at most alpha of calls fire per
+scalar — finite-sample, distribution-free, invariant to raw-vs-log transforms.
 
-k = EvalConfig.iqr_fence_k (default 2.5). The returned 'deviation' is how many
-IQR-widths (in log space) the value sits outside the fence — analogous to σ but
-distribution-free. A deviation of 0 means right at the fence; 1.0 means one full
-IQR-width beyond it.
+LEGACY (fallback — no calibration): Tukey fence in log space,
+  anomalous  iff  log(x) > log(Q3) + k * log_IQR  (or below the lower fence),
+k = EvalConfig.iqr_fence_k. Kept for stats built without calibration sets.
 
 Which signals are scored — and their transform, anomalous tail, and score-vs-
 trigger behaviour — is declared once in anomaly/scalars.py, not hardcoded here.
-The four scalars scored today:
-  5001  latency_ms
-  5002  total_tokens
-  5003  cost
-  5004  output_tokens
+Scored today: 5001 latency_ms, 5002 total_tokens, 5003 cost, 5004 output_tokens,
+5010 semantic_surprise.
 
 No baseline → no hits. The numeric-thresholds layer's 4001/4002/4003 serve as the cold-start fallback.
 """
@@ -41,21 +37,8 @@ def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[Eva
     hits: list[EvalHit] = []
     k = config.iqr_fence_k
 
-    def fire(spec: ScalarSpec, deviation: float, observed: float, stat: MetricStat) -> None:
-        cond      = describe(spec.code)
-        direction = "above upper fence" if deviation > 0 else "below lower fence"
-        if stat.log_transform and stat.log_q1 is not None:
-            fence_desc = (
-                f"log-IQR fence: Q1={stat.q1:.2f} Q3={stat.q3:.2f} "
-                f"log_IQR={stat.log_iqr:.3f} k={k} "
-                f"(deviation={deviation:+.2f} IQR-widths, {direction})"
-            )
-        else:
-            fence_desc = (
-                f"IQR fence: Q1={stat.q1:.2f} Q3={stat.q3:.2f} "
-                f"IQR={stat.iqr:.2f} k={k} "
-                f"(deviation={deviation:+.2f} IQR-widths, {direction})"
-            )
+    def fire(spec: ScalarSpec, observed: float, desc: str) -> None:
+        cond = describe(spec.code)
         hits.append(EvalHit(
             condition_code=cond.code,
             layer=cond.layer,
@@ -65,7 +48,7 @@ def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[Eva
             penalty=config.penalty_for(cond.code, cond.penalty),
             message=cond.description,
             observed=round(observed, 4),
-            expected=fence_desc,
+            expected=desc,
         ))
 
     for spec in SCALAR_SPECS:
@@ -74,21 +57,44 @@ def run_statistical_baseline(payload: CallInput, config: EvalConfig) -> list[Eva
         if stat is None or observed is None:
             continue
 
+        if stat.calibration:
+            # --- conformal path: rank-based p-value, guaranteed false-alarm rate
+            res = stat.conformal_p(observed, spec.tail)
+            if res is None:
+                continue
+            p, direction = res
+            n = len(stat.calibration)
+            p_floor = (2.0 if spec.tail == "both" else 1.0) / (n + 1)
+            threshold = max(config.conformal_alpha, p_floor)
+            if p > threshold:
+                continue
+            if spec.action != "score":
+                continue
+            fire(spec, float(observed),
+                 f"conformal: p={p:.4f} <= {threshold:.4f} "
+                 f"(alpha={config.conformal_alpha}, n={n} clean samples, {direction} history)")
+            continue
+
+        # --- legacy path: Tukey fence (log space when the stat carries it)
         deviation = stat.iqr_deviation(observed, k=k)
         if deviation is None:
             continue
-
-        # Tail gate: only fire on the side this scalar treats as anomalous.
         if spec.tail == "upper" and deviation < 0:
             continue
         if spec.tail == "lower" and deviation > 0:
             continue
-
-        # trigger-only scalars flag the call for escalation elsewhere (e.g. an
-        # LLM judge) rather than contributing a penalty here. None today.
         if spec.action != "score":
             continue
 
-        fire(spec, deviation, observed, stat)
+        direction = "above upper fence" if deviation > 0 else "below lower fence"
+        if stat.log_transform and stat.log_q1 is not None:
+            desc = (f"log-IQR fence: Q1={stat.q1:.2f} Q3={stat.q3:.2f} "
+                    f"log_IQR={stat.log_iqr:.3f} k={k} "
+                    f"(deviation={deviation:+.2f} IQR-widths, {direction})")
+        else:
+            desc = (f"IQR fence: Q1={stat.q1:.2f} Q3={stat.q3:.2f} "
+                    f"IQR={stat.iqr:.2f} k={k} "
+                    f"(deviation={deviation:+.2f} IQR-widths, {direction})")
+        fire(spec, float(observed), desc)
 
     return hits
