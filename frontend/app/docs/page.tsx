@@ -447,7 +447,7 @@ function SectionDetection() {
           { accent: 'border-red-600',    title: 'Hard failures',        desc: 'Deterministic, non-heuristic. status_success=false, error present, token accounting mismatch (total ≠ input+output), negative counts. Any single hit → 100pts → immediate trigger.' },
           { accent: 'border-orange-600', title: 'Format violations',    desc: 'Prompt-implied output contracts. Prompt asks for JSON but output isn\'t valid JSON. Yes/no prompt but output is prose. Enum step returned a non-enumerated value.' },
           { accent: 'border-blue-600',   title: 'Numeric thresholds',   desc: 'Static and adaptive p95 limits for latency, tokens, cost. Stall detection (high latency, near-zero output). Cross-field plausibility checks. Defers 4001/4002/4003 to the statistical layer when a baseline is active.' },
-          { accent: 'border-[#b794f4]', title: 'Statistical baseline', desc: 'IQR/log-normal detection against each step\'s own call history. Tukey fence computed in log space — multiplicative detection (is this 5× the 75th percentile?) rather than additive. Activates after 20 clean calls. Owns latency/tokens/cost scoring when active.' },
+          { accent: 'border-[#b794f4]', title: 'Statistical baseline', desc: 'Conformal detection against each step\'s own call history. Each metric is rank-tested against the step\'s clean history and fires only past a provable 1% false-alarm bound — no distribution assumed. Activates after 20 clean calls. Owns latency/tokens/cost scoring when active.' },
         ].map((l) => (
           <div key={l.title} className={`flex gap-4 px-4 py-4 border-l-2 ${l.accent} hover:bg-[#2d2440] transition-colors`}>
             <div>
@@ -470,30 +470,31 @@ function SectionDetection() {
       </Callout>
 
       <H2>Statistical baseline detection</H2>
-      <P>Once a step has 20+ calls, Cernova builds a per-step baseline using IQR statistics in log space. Every metric (latency, tokens, cost) is treated as log-normal — the right model for LLM data, which is always positive and right-skewed. Detection uses the Tukey fence:</P>
+      <P>Once a step has 20+ clean calls, that history becomes a <strong className="text-[#e9e4f0]">calibration set</strong> and every new call is scored with a split-conformal rank test. No distribution is assumed — the only question is where the observed value ranks against everything this step has done before:</P>
       <div className="border border-[#3a2f4e] bg-[#281f38] px-5 py-4 mb-5 f-type text-sm text-[#e9e4f0] leading-7">
-        <div>upper fence = log(Q3) + k × log-IQR</div>
-        <div>lower fence = log(Q1) − k × log-IQR</div>
-        <div className="mt-2 text-[#9a91ad] text-xs">k = 2.5 (default) · Q1/Q3 = 25th/75th percentile in log space</div>
+        <div>p = (1 + #&#123;history ≥ observed&#125;) / (n + 1)</div>
+        <div>fires when p ≤ max(α, p-floor)</div>
+        <div className="mt-2 text-[#9a91ad] text-xs">α = 0.01 · p-floor = 1/(n+1), the sharpest p-value n samples can certify (2/(n+1) two-sided)</div>
       </div>
-      <P>A call fires the statistical layer when log(observed) falls outside the fence. The reported score is how many IQR-widths beyond the fence the value sits — e.g. <code className="text-[#b794f4] f-type">+3.2×IQR</code> means the log-value is 3.2 fence-widths above the upper fence. This is multiplicative detection: &quot;is this call 5× more expensive than the 75th percentile?&quot; rather than additive &quot;is this call $0.50 above the mean?&quot;</P>
+      <P>A fired condition reports its evidence directly: <code className="text-[#b794f4] f-type">conformal: p=0.0400 ≤ 0.0400 (alpha=0.01, n=24 clean samples, above history)</code> — the observed value ranked beyond essentially all of the step&apos;s clean history. At n=24 the small-n floor means the layer fires at p ≤ 4%; the bound tightens to the full 1% automatically once history reaches 99 calls. The guarantee is unconditional: on normal traffic, each metric false-alarms on at most α of calls — finite-sample, distribution-free, and invariant to raw-vs-log transforms, since ranks don&apos;t change under monotone maps.</P>
       <Rows items={[
-        { key: '5001', label: 'latency_iqr_fence',       color: 'text-[#b794f4]', value: 'Call latency falls outside the Tukey fence in log space (multiplicative latency spike).' },
-        { key: '5002', label: 'tokens_iqr_fence',        color: 'text-[#b794f4]', value: 'Total token count falls outside the fence — abnormally large or small output for this step.' },
-        { key: '5003', label: 'cost_iqr_fence',          color: 'text-[#b794f4]', value: 'Call cost falls outside the fence — typically caused by unexpected token growth.' },
-        { key: '5004', label: 'output_tokens_iqr_fence', color: 'text-[#b794f4]', value: 'Output token count alone falls outside the fence, independent of input.' },
+        { key: '5001', label: 'latency_iqr_fence',       color: 'text-[#b794f4]', value: 'Call latency ranks beyond the step\'s clean history — a spike (or stall) this step has essentially never produced.' },
+        { key: '5002', label: 'tokens_iqr_fence',        color: 'text-[#b794f4]', value: 'Total token count ranks beyond the clean history — abnormally large or small output for this step.' },
+        { key: '5003', label: 'cost_iqr_fence',          color: 'text-[#b794f4]', value: 'Call cost ranks beyond the clean history — typically caused by unexpected token growth.' },
+        { key: '5004', label: 'output_tokens_iqr_fence', color: 'text-[#b794f4]', value: 'Output token count alone ranks beyond the clean history, independent of input.' },
+        { key: '5010', label: 'semantic_surprise_fence', color: 'text-[#b794f4]', value: 'Forward-model surprise: the output doesn\'t resemble what this step normally produces for this input. Upper tail only; sub-threshold alone by design.' },
       ]} />
       <Callout type="tip">
-        <strong className="text-[#e9e4f0]">Why IQR/log-normal over z-score?</strong> Z-scores assume normal distribution and are sensitive to outliers — a single past latency spike inflates std, making the detector blind to future spikes. IQR uses the middle 50% of data (Q1–Q3) so outliers don&apos;t shift the fence. Log-space means the test is multiplicative, which matches how LLM anomalies actually manifest.
+        <strong className="text-[#e9e4f0]">Why conformal over fences and z-scores?</strong> Z-scores assume normality; even Cernova&apos;s previous log-space Tukey fence assumed log-normal shape and needed a hand-tuned width. The conformal test assumes nothing: it&apos;s a rank test, so a single past spike shifts the decision by exactly one rank, and the ≤1% false-alarm rate is a finite-sample theorem rather than a heuristic. Condition names keep their historical <code className="f-type">_iqr_fence</code> identifiers — wire codes are frozen. Steps whose baselines lack a calibration set fall back to the legacy Tukey fence.
       </Callout>
       <P>Below 20 calls per step, the statistical layer is inactive and the numeric thresholds serve as fallback. The baseline also excludes: calls using a different model, calls before the last prompt evolution timestamp, and calls that themselves triggered anomalies.</P>
 
       <H2>Trend detection</H2>
-      <P>The Steps tab compares each step&apos;s recent window (last 10 calls) against its baseline window (calls 11–60) to detect gradual degradation that per-call scoring misses. Uses the same IQR/log-normal model as the statistical layer — the recent window mean is checked against the baseline Tukey fence. The reported deviation (<code className="text-[#b794f4] f-type">+1.4×IQR</code>) is how many IQR-widths outside the fence the recent average sits.</P>
+      <P>The Steps tab compares each step&apos;s recent window (last 10 calls) against its baseline window (calls 11–60) to detect gradual degradation that per-call scoring misses. This check uses a log-space IQR/Tukey model — the recent window mean is checked against the baseline Tukey fence. The reported deviation (<code className="text-[#b794f4] f-type">+1.4×IQR</code>) is how many IQR-widths outside the fence the recent average sits.</P>
       <Rows items={[
         { key: 'healthy',   color: 'text-green-500',  value: 'Recent mean is within the baseline IQR box (Q1–Q3). No drift.' },
         { key: 'degrading', color: 'text-yellow-500', value: 'Recent mean has drifted outside the IQR box but within the Tukey fence. Early warning.' },
-        { key: 'critical',  color: 'text-red-500',    value: 'Recent mean is outside the Tukey fence (k=2.5). Significant regression — the average of the last 10 calls is anomalous by the statistical layer\'s standards.' },
+        { key: 'critical',  color: 'text-red-500',    value: 'Recent mean is outside the Tukey fence (k=2.5). Significant regression — the average of the last 10 calls sits where individual anomalous calls would.' },
         { key: 'warming',   color: 'text-[#9a91ad]',   value: 'Not enough call history yet. Shows progress toward the 20-call activation threshold.' },
       ]} />
       <P>Trend detection requires at least 30 calls per step (20 baseline + 10 recent). It catches slow latency creep, cost drift, and throughput degradation that individual call scores would miss.</P>
