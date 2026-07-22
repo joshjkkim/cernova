@@ -66,10 +66,40 @@ def test_contract_reject_marks_rejected(client):
     assert client._calls["rejected"] == ["sp2"]
 
 
-def test_anomaly_feedback_is_label_only(client):
-    r = _post(client, {"subject_type": "anomaly", "subject_id": "42", "verdict": "reject"})
+def test_anomaly_confirm_is_label_only(client):
+    r = _post(client, {"subject_type": "anomaly", "subject_id": "run-9", "verdict": "confirm"})
     assert r.status_code == 200
-    assert r.json()["applied"] == "stored"           # no mechanical effect yet
-    assert client._calls["promoted"] == []
-    assert client._calls["rejected"] == []
+    assert r.json()["applied"] == "stored"           # real issue: no mechanical effect
     assert len(client._calls["stored"]) == 1         # but the label is captured
+
+
+def test_anomaly_reject_reincludes_run(client, monkeypatch):
+    import services.feedback_service as svc
+    seen = []
+    monkeypatch.setattr(svc, "_reinclude_run_in_baseline",
+                        lambda pid, rid: seen.append((pid, rid)) or 3)
+    r = _post(client, {"subject_type": "anomaly", "subject_id": "run-9", "verdict": "reject"})
+    assert r.status_code == 200
+    assert r.json()["applied"] == "baseline_reincluded:3"
+    assert seen == [("proj-1", "run-9")]             # scoped to the authed project
+    assert len(client._calls["stored"]) == 1
+
+
+def test_reinclude_flips_calls_and_counts(fake_db, monkeypatch):
+    import services.feedback_service as svc
+    db = fake_db()
+    monkeypatch.setattr(svc, "get_client", lambda: db)
+    n = svc._reinclude_run_in_baseline("proj-1", "run-9")
+    assert n == 1                                    # fake update echoes one row
+    assert db.writes == [("CALLS", "update", {"anomaly_triggered": False})]
+
+
+def test_anomaly_reject_effect_failure_keeps_label(client, monkeypatch):
+    import services.feedback_service as svc
+    def boom(pid, rid):
+        raise RuntimeError("db down")
+    monkeypatch.setattr(svc, "_reinclude_run_in_baseline", boom)
+    r = _post(client, {"subject_type": "anomaly", "subject_id": "run-9", "verdict": "reject"})
+    assert r.status_code == 200                      # label stored, effect degraded
+    assert r.json()["applied"] == "baseline_reinclusion_failed"
+    assert len(client._calls["stored"]) == 1

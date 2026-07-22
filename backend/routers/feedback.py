@@ -40,7 +40,7 @@ def submit_feedback(request: Request, payload: FeedbackInput) -> FeedbackRespons
         raise HTTPException(status_code=400, detail=f"verdict must be one of {sorted(VERDICTS)}")
 
     feedback_id = store_feedback(project["id"], payload)
-    applied = apply_feedback(payload)
+    applied = apply_feedback(payload, project["id"])
     log.info(f"[feedback] project={project['id']} {payload.subject_type}/{payload.verdict} "
              f"subject={payload.subject_id} → {applied}")
     return FeedbackResponse(id=feedback_id, applied=applied)
