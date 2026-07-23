@@ -30,7 +30,7 @@ function H2({ children }: { children: React.ReactNode }) {
 }
 
 function H3({ children }: { children: React.ReactNode }) {
-  return <h3 className="f-type font-bold text-[11px] text-[#b794f4] mt-8 mb-3 uppercase tracking-[0.2em]"><span className="mr-2">◆</span>{children}</h3>;
+  return <h3 className="f-type font-bold text-[11px] text-[#b794f4] mt-8 mb-3 uppercase tracking-[0.2em]">{children}</h3>;
 }
 
 function P({ children }: { children: React.ReactNode }) {
@@ -732,7 +732,10 @@ export default function DocsPage() {
             Cernova
           </Link>
           <div className="flex items-center gap-7">
-            <span className="f-type text-[11px] font-bold uppercase tracking-[0.16em] text-[#b794f4]">◆ Docs</span>
+            <Link href="/" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Home</Link>
+            <Link href="/about" className="hidden md:inline f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">About</Link>
+            <Link href="/mission" className="hidden md:inline f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Mission</Link>
+            <span className="f-type text-[11px] font-bold uppercase tracking-[0.16em] text-[#b794f4]">Docs</span>
             <Link href="/login" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors">Sign in</Link>
             <Link href="/login" className="f-type text-[11px] font-bold uppercase tracking-[0.14em] px-4 py-2 bg-[#e9e4f0] text-[#201a2b] hover:bg-[#b794f4] transition-colors">
               Get started →

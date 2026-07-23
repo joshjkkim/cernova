@@ -14,6 +14,9 @@ python-sdk/dist/
 # OS
 .DS_Store
 
+# Cursor IDE
+.cursor/
+
 # Database backups — full schema dumps, not versioned migrations
 backend/migrations/trace_backup.sql
 backend/migrations/*backup*.sql
