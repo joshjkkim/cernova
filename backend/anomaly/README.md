@@ -27,72 +27,40 @@ if result.triggered:
 
 ## How scoring works
 
-Five layers run in order: `L1_hard → L2_format → L3_behavioral → L4_integers → L5_statistical`.
-Each fired condition adds its **penalty** to a running `total_score` (recorded in
-`error_map`). After each layer the threshold is checked; once
-`total_score >= threshold` (default **100**) the call is flagged and evaluation
-**short-circuits**, recording `stopped_at_layer`.
+Four layers run in order. Each fired condition adds its **penalty** to a running
+`total_score` (recorded in `error_map`). After each layer the threshold is
+checked; once `total_score >= threshold` (default **50**) the call is flagged and
+evaluation **short-circuits**, recording `stopped_at_layer`.
 
 ```
-L1_hard → L2_format → L3_behavioral → L4_integers → L5_statistical
-   │          │              │              │               │
+hard_failures → output_format → numeric_thresholds → statistical_baseline
+   │                 │                  │                     │
    └── each fired condition: error_map[code] += penalty, then check threshold ──┘
 ```
+
+Layer labels are semantic, not positional — adding or removing a layer never
+leaves a misleading numeric gap. Condition codes (1xxx/2xxx/4xxx/5xxx) are frozen,
+opaque identifiers persisted in the DB; their number prefix is historical and does
+not track a layer's order (there is deliberately no 3xxx range — an early heuristic
+shape layer was removed for overlapping with `output_format`).
 
 A clean run (below threshold at the end) returns an empty report — `hits=[]`,
 `error_map={}`, `total_score=0` — per the "clean calls store nothing" rule.
 
 | Layer | File | Codes | Catches |
 |-------|------|-------|---------|
-| **L1 hard** | `layers/layer_1_hard.py` | 1001–1008 | Deterministic failures: status=False, error set, empty output, negative/inconsistent numbers, missing identity fields. Penalty 100 each → any single hit flags immediately. |
-| **L2 format** | `layers/layer_2_regex.py` | 2001–2004 | Prompt-implied contracts: JSON / strict-JSON / enum / yes-no violations (25–60 pts). |
-| **L3 behavioral** | `layers/layer_3_behavioral/` | 3010 | Cosine drift of the call's **behavior vector** from this step's clean-history centroid. Requires ≥20 stored vectors (`BehaviorBaseline`). |
-| **L4 integers** | `layers/layer_4_integers.py` | 4001–4010 | Static numeric limits (latency/tokens/cost/ratio) + cross-field plausibility (classify/short/json bloat, high-latency-low-output, chars-per-token, zero-tokens-with-body). |
-| **L5 statistical** | `layers/layer_5_statistical.py` | 5001–5004 | IQR/log-normal Tukey-fence deviations from this step's own baseline (latency/tokens/cost/output-tokens). Only fires when a `StepBaseline` is supplied. |
+| **hard_failures** | `layers/hard_failures.py` | 1001–1008 | Deterministic failures: status=False, error set, empty output, negative/inconsistent numbers, missing identity fields. Penalty 100 each → any single hit flags immediately. |
+| **output_format** | `layers/output_format.py` | 2001–2004 | Prompt-implied contracts: JSON / strict-JSON / enum / yes-no violations. |
+| **numeric_thresholds** | `layers/numeric_thresholds.py` | 4001–4010 | Numeric limits (latency/tokens/cost/ratio) + cross-field plausibility (classify/short/json bloat, high-latency-low-output, chars-per-token, zero-tokens-with-body). |
+| **statistical_baseline** | `layers/statistical_baseline.py` | 5001–5004 | Per-step IQR/log-normal Tukey fence (log space) on latency, tokens, cost, output-tokens. Fires once a step has ≥20 baseline samples; owns latency/tokens/cost when active. |
 
-> **L3 vs fingerprinter:** The fingerprinter (`backend/services/fingerprinter.py`) embeds the **system prompt only** (384d) to assign `step_profile_id`. L3 builds a separate **778-d behavior vector** (system + output + numeric metrics + goal type), stores it on `CALLS.behavior_vector`, and compares it to a per-profile centroid. They answer different questions: *which step?* vs *does this call behave like past clean calls on that step?*
-
-**L3 lives in one subpackage** — two jobs, one file each:
-
-```
-layers/layer_3_behavioral/
-  behavior_vector.py  BUILD   — build_behavior_vector (incl. classify_goal_type) → the 778-d fingerprint
-  layer.py            COMPARE — run_layer_3_behavioral → cosine drift vs centroid → 3010
-```
-
-Import the public surface from the package (`from anomaly.layers.layer_3_behavioral import build_behavior_vector, classify_goal_type`), not the inner modules.
-
-Every active condition is registered in `condition_registry.py` (code → name,
-penalty, description). The UI maps a code to a human label without parsing Python.
+Every condition is registered in `condition_registry.py` (code → name, penalty,
+description). The UI maps a code to a human label without parsing Python.
 Penalties live there, not in the layer files. Tune per-code penalties or the
 threshold via `EvalConfig` (`config.py`) without editing layers.
 
-L4 penalties are intentionally small (10–25): one large number alone is rarely an
-anomaly, a cluster of them is. L3 (35) and L5 penalties (20–30) are higher because
-they measure drift against the step's own history.
-
-When an L5 baseline is active it **owns** latency/tokens/cost — L4's raw threshold
-checks (4001/4002/4003) defer to it to avoid double-counting.
-
-## Behavior vector (778 dims)
-
-Built at ingest in a background thread (`build_behavior_vector` in
-`layers/layer_3_behavioral/behavior_vector.py`):
-
-| Block | Size | Source |
-|-------|------|--------|
-| `prompt_embed` | 384 | System prompt only (first 500 chars; shared kernel with fingerprinter) |
-| `output_embed` | 384 | `output_code` first 500 chars; empty → zero vector |
-| `numeric_block` | 6 | log-scaled: latency_ms, total_tokens, output_tokens, input_tokens, cost, output_char_len |
-| `goal_type` | 4 | One-hot: Lookup, Extract, Transform, Creative |
-
-The concatenated vector is L2-normalized. Centroids are the mean of the last 200
-clean vectors (same model, post-`last_evolved_at`, exclude `anomaly_triggered`),
-then L2-normalized. Cold start: fewer than 20 vectors → L3 returns no hits.
-
-**Important:** `CallInput.prompt` at ingest is the merged system+user instruction
-(for L2). L3's `prompt_embed` uses `CallInput.system_prompt` (system only) — do not
-merge user content into the behavioral prompt block.
+`numeric_thresholds` penalties are intentionally small (10–25): one large number
+alone is rarely an anomaly, a cluster of them is.
 
 ## Result shape
 
@@ -102,16 +70,24 @@ merge user content into the behavioral prompt block.
 
 ## Performance & integration
 
-Pure in-process Python — no I/O inside the anomaly package. A typical call (all
-layers) scores in tens of microseconds.
+Pure in-process Python — no I/O. Measured:
 
-Because `/ingest` is the SDK hot path, embedding and scoring run **off the response
-path** — in a daemon thread (`_run_fingerprint_then_anomaly` in
-`backend/routers/ingest.py`) so the trace write returns immediately.
+| Case | Per call |
+|------|----------|
+| Typical call (all 4 layers) | ~18 µs |
+| Pathological 200 KB output body | ~15 ms (string scan over the body) |
 
-The backend builds `CallInput` with merged `prompt` (L2), `system_prompt` (L3
-kernel), and pre-computed `behavior_vector`, then calls `evaluate_call` with
-`EvalConfig(behavior_baseline=..., baseline=..., limits=...)`.
+For normal traffic it's effectively free. Because `/ingest` is the SDK hot path,
+run scoring **off the response path** (e.g. FastAPI `BackgroundTasks` or a queue)
+so the trace write returns immediately and the SDK never waits on it.
+
+The backend adapter is a one-liner:
+
+```python
+# backend/services/anomaly_adapter.py
+def evaluate_ingest(payload: IngestPayload) -> EvalResult:
+    return evaluate_call(CallInput.model_validate(payload.model_dump()))
+```
 
 ## Tests
 
@@ -122,9 +98,8 @@ on import. Run either way:
 cd anomaly && pytest
 # or, no pytest needed (also prints each layer's EvalResult):
 ../backend/.venv/bin/python tests/test_evaluator.py
-../backend/.venv/bin/python tests/test_layer_1_hard.py
+../backend/.venv/bin/python tests/test_hard_failures.py
 ```
 
-`tests/test_evaluator.py` covers one call per layer plus a fully clean call.
-`tests/test_behavior_vector.py`, `tests/test_goal_type.py`, and
-`tests/test_layer_3_behavioral.py` cover the L3 building blocks.
+`tests/test_evaluator.py` covers one call per layer (each passes the earlier
+layers cleanly and stops at its target layer) plus a fully clean call.

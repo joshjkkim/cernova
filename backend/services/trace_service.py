@@ -24,6 +24,13 @@ def ingest_trace(payload: CanonicalTrace) -> str:
         "project_id":      payload.project_id,
         "span_id":         payload.span_id,
         "parent_span_id":  payload.parent_span_id,
+        # None → stripped below, so live ingest falls back to the DB now()
+        # default; imports pass the historical time to backdate the row.
+        "created_at":      payload.timestamp,
+        # Provenance / dedup. external_id is set only by importers; the partial
+        # unique index on (project_id, source, external_id) makes re-imports safe.
+        "source":          payload.source,
+        "external_id":     payload.external_id,
     }
     # Remove None values so Supabase uses column defaults
     data = {k: v for k, v in data.items() if v is not None}

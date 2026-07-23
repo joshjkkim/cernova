@@ -1,38 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
-  <defs>
-    <linearGradient id="pulse-grad" x1="0" y1="0" x2="64" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0%"   stop-color="#6d28d9" stop-opacity="0.3"/>
-      <stop offset="45%"  stop-color="#c4b5fd"/>
-      <stop offset="100%" stop-color="#6d28d9" stop-opacity="0.3"/>
-    </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="1.5" result="blur"/>
-      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
-    </filter>
-  </defs>
+<svg viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cernova logomark, wireframe style">
+  <g fill="none" stroke="#7C3AED" stroke-linejoin="round" stroke-linecap="round">
+    <!-- Outer nova star -->
+    <path stroke-width="9" d="M256,32 L307,205 L480,256 L307,307 L256,480 L205,307 L32,256 L205,205 Z"/>
 
-  <!-- Hexagon (flat-top) -->
-  <polygon
-    points="58,32 45,55 19,55 6,32 19,9 45,9"
-    stroke="#7c3aed"
-    stroke-width="2.5"
-    fill="#1e1b4b"
-    fill-opacity="0.5"
-    stroke-linejoin="round"
-  />
+    <!-- Facet lines: tip to core -->
+    <g stroke-width="5">
+      <line x1="256" y1="32"  x2="256" y2="212"/>
+      <line x1="480" y1="256" x2="300" y2="256"/>
+      <line x1="256" y1="480" x2="256" y2="300"/>
+      <line x1="32"  y1="256" x2="212" y2="256"/>
+    </g>
 
-  <!-- Pulse / ECG line -->
-  <polyline
-    points="10,32 15,32 19,28 23,42 27,18 31,40 35,32 54,32"
-    stroke="url(#pulse-grad)"
-    stroke-width="2.2"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-    filter="url(#glow)"
-  />
+    <!-- Core diamond -->
+    <path stroke-width="9" d="M256,212 L300,256 L256,300 L212,256 Z"/>
 
-  <!-- Nodes -->
-  <circle cx="15" cy="32" r="2.5" fill="#7c3aed"/>
-  <circle cx="27" cy="18" r="3.2" fill="#c4b5fd" filter="url(#glow)"/>
-  <circle cx="35" cy="32" r="2.5" fill="#7c3aed"/>
+    <!-- Diagonal crystal shards -->
+    <g stroke-width="9">
+      <path d="M323,189 L333,156 L373,139 L356,179 Z"/>
+      <path d="M323,323 L356,333 L373,373 L333,356 Z"/>
+      <path d="M189,323 L156,333 L139,373 L179,356 Z"/>
+      <path d="M189,189 L179,156 L139,139 L156,179 Z"/>
+    </g>
+  </g>
 </svg>

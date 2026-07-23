@@ -1,13 +1,7 @@
 import type { Tracer } from '../tracer';
 import { getCost } from '../cost';
 import { getActiveSpanId, runWithSpan } from '../context';
-
-function uuid(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = (Math.random() * 16) | 0;
-    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
-  });
-}
+import { uuid } from '../uuid';
 
 export interface OpenAIMessage {
   role: string;

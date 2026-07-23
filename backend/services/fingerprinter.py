@@ -11,18 +11,51 @@ Three outcomes:
   new      — similarity < 0.75, genuinely new step, create profile
 """
 
+import logging
 import threading
+from functools import lru_cache
 
 from db import get_client
-from services.embedding_service import embed
 
-MATCH_THRESHOLD = 0.92
+log = logging.getLogger(__name__)
+
+MATCH_THRESHOLD  = 0.92
 EVOLVED_THRESHOLD = 0.75
 
-# Serialize match-or-create per process: concurrent ingest threads that embed
-# the same kernel would otherwise all miss the RPC before any INSERT commits
-# and create duplicate profiles (thundering herd on cold start).
-_profile_lock = threading.Lock()
+
+def _classify_role(embedding: list[float]) -> tuple[str, str] | None:
+    """Best-effort role classification for a step profile.
+
+    Returns (role, variance) for a confident prediction, else None. Logs the
+    outcome either way — including declines — so a silent skip is never
+    ambiguous. Never raises: role is optional metadata and must not break ingest.
+    """
+    try:
+        from services.step_classifier import classify_role
+        pred = classify_role(embedding)
+        if pred.role:
+            log.info(f"[step-classifier] role={pred.role} variance={pred.variance} "
+                     f"conf={pred.confidence:.2f}")
+            return pred.role, pred.variance
+        log.info(f"[step-classifier] declined (top conf={pred.confidence:.2f}) — role left unchanged")
+        return None
+    except Exception:
+        log.error("[step-classifier] classification failed", exc_info=True)
+        return None
+
+# Model is loaded once and reused — ~80MB, loads in ~1s on first call
+@lru_cache(maxsize=1)
+def _get_model():
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer("all-MiniLM-L6-v2")
+
+_model_lock = threading.Lock()
+
+
+def _embed(text: str) -> list[float]:
+    with _model_lock:
+        model = _get_model()
+    return model.encode(text, normalize_embeddings=True).tolist()
 
 
 def _derive_step_name(system_text: str | None) -> str | None:
@@ -49,23 +82,14 @@ def match_or_create_profile(
     Returns (None, 'error') if anything fails — ingest should continue regardless.
     """
     try:
-        embedding = embed(kernel)
+        embedding = _embed(kernel)
         db = get_client()
 
-        with _profile_lock:
-            return _match_or_create_locked(db, embedding, project_id, step_name, system_text)
-    except Exception as exc:
-        print(f"[fingerprint] failed for project={project_id} step={step_name}: {exc}")
-        return None, "error"
-
-
-def _match_or_create_locked(
-    db, embedding: list[float], project_id: str, step_name: str, system_text: str | None
-) -> tuple[str | None, str]:
+        # pgvector nearest-neighbour search within this project
         result = db.rpc("match_step_profile", {
-            "p_project_id": project_id,
-            "p_embedding": embedding,
-            "p_threshold": EVOLVED_THRESHOLD,
+            "p_project_id":   project_id,
+            "p_embedding":    embedding,
+            "p_threshold":    EVOLVED_THRESHOLD,
         }).execute()
 
         if result.data:
@@ -78,20 +102,43 @@ def _match_or_create_locked(
             updates: dict = {"step_name": step_name, "last_seen_at": "now()"}
             if status == "evolved":
                 updates["last_evolved_at"] = "now()"
-                print(f"[fingerprint] step evolved: {step_name} similarity={similarity:.3f} — baseline reset")
+                log.info(f"[fingerprint] step evolved: {step_name} similarity={similarity:.3f} — baseline reset")
+                # The prompt changed enough to reset the baseline, so the step's
+                # role may have changed too — re-classify. Only a confident
+                # prediction overwrites; a decline leaves the existing role intact
+                # (upgrade on confidence, never downgrade to null). Folded into the
+                # update above, so no extra query.
+                rv = _classify_role(embedding)
+                if rv:
+                    updates["role"], updates["variance_tolerance"] = rv
 
             db.table("step_profiles").update(updates).eq("id", profile_id).execute()
             return profile_id, status
 
+        # No match — create new profile
         display_name = step_name if not step_name.startswith("step_") else (
             _derive_step_name(system_text) or step_name
         )
         res = db.table("step_profiles").insert({
-            "project_id": project_id,
+            "project_id":  project_id,
             "fingerprint": embedding,
-            "step_name": display_name,
+            "step_name":   display_name,
         }).execute()
 
         profile_id = res.data[0]["id"]
-        print(f"[fingerprint] new step profile: {display_name} id={profile_id}")
+        log.info(f"[fingerprint] new step profile: {display_name} id={profile_id}")
+
+        # Classify the step's role once, reusing the embedding we already computed
+        # (zero extra embed). Best-effort — the profile exists regardless, and the
+        # engine falls back to defaults when the role is unset.
+        rv = _classify_role(embedding)
+        if rv:
+            db.table("step_profiles").update(
+                {"role": rv[0], "variance_tolerance": rv[1]}
+            ).eq("id", profile_id).execute()
+
         return profile_id, "new"
+
+    except Exception:
+        log.error(f"[fingerprint] failed for project={project_id} step={step_name}", exc_info=True)
+        return None, "error"

@@ -15,16 +15,19 @@ export default function LoginPage() {
   }, [router]);
 
   return (
-    <main className="min-h-screen bg-black text-white antialiased flex items-center justify-center p-4">
+    <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] antialiased flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
-          <a href="/" className="inline-flex items-center gap-2 font-sans font-black text-lg text-white">
+          <a href="/" className="inline-flex items-center gap-2 font-sans font-black text-lg text-[#e9e4f0]">
             <img src="/logo.svg" alt="" className="w-5 h-5" />
             Cernova
           </a>
-          <p className="font-mono text-[11px] text-gray-600 mt-2">sign in to your account</p>
+          <p className="font-mono text-[11px] text-[#9a91ad] mt-2">sign in to your account</p>
         </div>
         <AuthForm />
+        <p className="mt-6 text-center">
+          <a href="/" className="font-mono text-[11px] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">← back to home</a>
+        </p>
       </div>
     </main>
   );

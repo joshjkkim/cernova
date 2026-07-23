@@ -1,3 +1,4 @@
+import logging
 import threading
 from fastapi import APIRouter, Request, HTTPException
 import sentry_sdk
@@ -15,6 +16,8 @@ from services.anomaly_service import ingest_anomalies
 from anomaly import evaluate_call, CallInput
 from db import get_client
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(tags=["ingest"])
 
 
@@ -30,10 +33,10 @@ def _resolve_project(api_key: str) -> dict | None:
             .execute()
         )
         if not res.data:
-            print(f"[ingest] no project found for key {api_key[:12]}…")
+            log.warning(f"[ingest] no project found for key {api_key[:12]}…")
         return res.data if res.data else None
-    except Exception as exc:
-        print(f"[ingest] _resolve_project error for key {api_key[:12]}…: {exc}")
+    except Exception:
+        log.error(f"[ingest] _resolve_project error for key {api_key[:12]}…", exc_info=True)
         return None
 
 
@@ -79,8 +82,8 @@ def _fire_slack(project: dict, payload: CanonicalTrace) -> None:
             rate = errors / len(rows)
             if rate >= rate_threshold:
                 send_rate_alert(webhook, name, pid, rate, len(rows))
-    except Exception as exc:
-        print(f"[ingest] error rate check failed: {exc}")
+    except Exception:
+        log.error("[ingest] error rate check failed", exc_info=True)
 
 
 def _fire_user_sentry_performance(
@@ -164,9 +167,9 @@ def _fire_user_sentry_performance(
         scope = Scope()
         user_client.capture_event(event, scope=scope)
         user_client.flush(timeout=3)
-        print(f"[sentry-perf] transaction: step={payload.step_name} trace={trace_id[:8]}… score={anomaly_score}")
-    except Exception as exc:
-        print(f"[ingest] sentry performance failed: {exc}")
+        log.info(f"[sentry-perf] transaction: step={payload.step_name} trace={trace_id[:8]}… score={anomaly_score}")
+    except Exception:
+        log.error("[ingest] sentry performance failed", exc_info=True)
 
 
 def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: str) -> None:
@@ -195,9 +198,9 @@ def _fire_user_sentry(dsn: str, payload: CanonicalTrace, result, project_name: s
             scope=scope,
         )
         flushed = user_client.flush(timeout=5)
-        print(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
-    except Exception as exc:
-        print(f"[ingest] user sentry fire failed: {exc}")
+        log.info(f"[sentry] event_id={event_id} flushed={flushed} step={payload.step_name} score={result.total_score} level={level}")
+    except Exception:
+        log.error("[ingest] user sentry fire failed", exc_info=True)
 
 
 def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> dict[str, float] | None:
@@ -239,29 +242,22 @@ def _dynamic_l4_limits(project_id: str, step_profile_id: str | None = None) -> d
             limits["cost_max"] = max(0.05, percentile(costs, 0.95))
 
         return limits or None
-    except Exception as exc:
-        print(f"[anomaly] dynamic limits failed: {exc}")
+    except Exception:
+        log.error("[anomaly] dynamic limits failed", exc_info=True)
         return None
 
 
-def _run_anomaly_detection(
-    payload: CanonicalTrace,
-    project: dict | None,
-    step_profile_id: str | None = None,
-    trace_id: str | None = None,
-    *,
-    behavior_vector: list[float] | None = None,
-    system_prompt: str | None = None,
-) -> None:
-    """Run in a background thread — score the call and persist any anomalies."""
+def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_profile_id: str | None = None, trace_id: str | None = None, suppress_alerts: bool = False) -> None:
+    """Run in a background thread — score the call and persist any anomalies.
+    Anomalies are always persisted; suppress_alerts only gates the outbound
+    Slack/Sentry fires (so imports build baselines silently)."""
     try:
         from anomaly.config import EvalConfig
+        # instruction_text() keeps JSON wrapper keys out of L2/L3 format checks
         call_input = CallInput(
             step_name=payload.step_name,
             model=payload.model,
             prompt=payload.instruction_text(),
-            system_prompt=system_prompt,
-            behavior_vector=behavior_vector,
             input_tokens=payload.input_tokens,
             output_tokens=payload.output_tokens,
             reasoning_tokens=payload.reasoning_tokens,
@@ -287,60 +283,87 @@ def _run_anomaly_detection(
                     overrides["cost_max"] = project["threshold_cost"]
                 if overrides:
                     config = EvalConfig(limits={**config.limits, **overrides})
-                    print(f"[anomaly] manual L4 limits for project {project['id']}: {overrides}")
+                    log.info(f"[anomaly] manual L4 limits for project {project['id']}: {overrides}")
             else:
                 dynamic = _dynamic_l4_limits(project["id"], step_profile_id=step_profile_id)
                 if dynamic:
                     config = EvalConfig(limits={**config.limits, **dynamic})
                     scope = f"profile={step_profile_id}" if step_profile_id else "project-wide"
-                    print(f"[anomaly] dynamic L4 limits ({scope}): {dynamic}")
+                    log.info(f"[anomaly] dynamic L4 limits ({scope}): {dynamic}")
 
-        # L5: inject per-step statistical baseline when available
+        # L5: inject per-step statistical baseline when available. Size the Tukey
+        # fence to the step's role-derived variance tolerance (carried on the
+        # baseline) — tighter for deterministic steps, wider for creative ones.
+        # Unclassified steps resolve to DEFAULT_K, so behaviour is unchanged.
         if step_profile_id:
             from services.baseline_service import compute_baseline
             baseline = compute_baseline(step_profile_id, model=payload.model)
             if baseline:
-                config = EvalConfig(**{**config.model_dump(), "baseline": baseline})
-                print(f"[anomaly] L5 baseline for profile={step_profile_id}: n={baseline.sample_count}")
+                # L1 perception: forward-model semantic surprise — "is this
+                # output what this step produces for this input?" Role-gated and
+                # cached inside the service; None just means 5010 doesn't score.
+                # Attached only when a baseline exists so numeric_thresholds'
+                # defer-to-baseline behaviour is untouched.
+                try:
+                    from services.forward_model_service import score_surprise
+                    scored = score_surprise(step_profile_id, payload.raw_prompt, payload.output_text)
+                    if scored:
+                        call_input.semantic_surprise = scored[0]
+                        baseline.semantic_surprise = scored[1]
+                        log.info(f"[anomaly] L1 surprise for profile={step_profile_id}: "
+                                 f"{scored[0]:.3f} (fence q3={scored[1].q3:.3f})")
+                except Exception:
+                    log.error(f"[forward-model] attach failed profile={step_profile_id}", exc_info=True)
 
-            from services.behavior_baseline_service import compute_behavior_baseline
-            behavior_baseline = compute_behavior_baseline(step_profile_id, model=payload.model)
-            if behavior_baseline:
-                config = EvalConfig(**{**config.model_dump(), "behavior_baseline": behavior_baseline})
-                print(f"[anomaly] L3 behavior baseline for profile={step_profile_id}: n={behavior_baseline.sample_count}")
-        result = evaluate_call(call_input, config)
-
-        # Contract check: compare this output against the step's learned contract.
-        # Enforced hard violations fold into the anomaly score; proposed contracts
-        # are checked and logged only (never silently fabricate an anomaly).
+                from services.step_classifier import k_for_variance
+                k = k_for_variance(baseline.variance_tolerance)
+                config = EvalConfig(**{**config.model_dump(), "baseline": baseline, "iqr_fence_k": k})
+                log.info(f"[anomaly] L5 baseline for profile={step_profile_id}: "
+                         f"n={baseline.sample_count} k={k} (variance={baseline.variance_tolerance})")
+        # Load the step's learned contract up front. An *enforced* contract is the
+        # source of truth for output shape, so the regex output_format layer defers
+        # its JSON checks (2001/2002) to it — the contract's format_not_json (2010)
+        # covers the same failure, avoiding a double-count.
+        contract = None
         if step_profile_id:
             try:
-                from services.contract_service import load_contract, evaluate_contract
+                from services.contract_service import load_contract
                 contract = load_contract(step_profile_id)
-                if contract:
-                    check, contract_codes = evaluate_contract(contract, payload.output_text)
-                    print(f"[contract] profile={step_profile_id} status={contract.status} "
-                          f"passed={check.passed} violations={[v.code for v in check.violations]}")
-                    if contract_codes:
-                        for code, penalty in contract_codes.items():
-                            result.error_map[code] = penalty
-                        result.total_score += sum(contract_codes.values())
-                        result.triggered = result.total_score >= result.threshold
-            except Exception as exc:
-                print(f"[contract] check failed for profile={step_profile_id}: {exc}")
+            except Exception:
+                log.error(f"[contract] load failed for profile={step_profile_id}", exc_info=True)
+        if contract and contract.status == "enforced":
+            config = EvalConfig(**{**config.model_dump(), "contract_governs_format": True})
+
+        result = evaluate_call(call_input, config)
+
+        # Contract check: enforced hard violations fold into the anomaly score;
+        # proposed contracts are checked and logged only (never silently fabricate).
+        if contract:
+            try:
+                from services.contract_service import evaluate_contract
+                check, contract_codes = evaluate_contract(contract, payload.output_text)
+                log.info(f"[contract] profile={step_profile_id} status={contract.status} "
+                         f"passed={check.passed} violations={[v.code for v in check.violations]}")
+                if contract_codes:
+                    for code, penalty in contract_codes.items():
+                        result.error_map[code] = penalty
+                    result.total_score += sum(contract_codes.values())
+                    result.triggered = result.total_score >= result.threshold
+            except Exception:
+                log.error(f"[contract] check failed for profile={step_profile_id}", exc_info=True)
 
         # Mark the CALLS row so it's excluded from future baselines
         if result.triggered and trace_id:
             try:
                 get_client().table("CALLS").update({"anomaly_triggered": True}).eq("id", trace_id).execute()
-            except Exception as exc:
-                print(f"[anomaly] failed to mark anomaly_triggered for trace={trace_id}: {exc}")
-        print(f"[anomaly] run={payload.run_id} step={payload.step_name} score={result.total_score} triggered={result.triggered} layer={result.stopped_at_layer} codes={dict(result.error_map)}")
+            except Exception:
+                log.error(f"[anomaly] failed to mark anomaly_triggered for trace={trace_id}", exc_info=True)
+        log.info(f"[anomaly] run={payload.run_id} step={payload.step_name} score={result.total_score} triggered={result.triggered} layer={result.stopped_at_layer} codes={dict(result.error_map)}")
 
         # Performance transaction for every call — fires even if no anomaly
         _perf_dsn   = project.get("sentry_dsn") if project else None
         _perf_level = (project.get("sentry_alert_level") or "critical") if project else "critical"
-        if _perf_dsn and _perf_level != "none":
+        if not suppress_alerts and _perf_dsn and _perf_level != "none":
             _fire_user_sentry_performance(_perf_dsn, payload, result.total_score, result.triggered, project.get("name", "unknown"))
 
         if result.error_map:
@@ -356,13 +379,13 @@ def _run_anomaly_detection(
 
             dsn = project.get("sentry_dsn") if project else None
             level = (project.get("sentry_alert_level") or "critical") if project else "critical"
-            if dsn and level != "none":
+            if not suppress_alerts and dsn and level != "none":
                 if level == "warning" or result.triggered:
                     _fire_user_sentry(dsn, payload, result, project.get("name", "unknown"))
 
             webhook = project.get("slack_webhook_url") if project else None
             slack_level = (project.get("slack_anomaly_level") or "critical") if project else "critical"
-            if webhook and slack_level != "none":
+            if not suppress_alerts and webhook and slack_level != "none":
                 if slack_level == "warning" or result.triggered:
                     from anomaly import CONDITION_REGISTRY
                     condition_names = {
@@ -380,30 +403,52 @@ def _run_anomaly_detection(
                         condition_names=condition_names,
                         triggered=result.triggered,
                     )
-    except Exception as exc:
-        print(f"[ingest] anomaly detection failed for run {payload.run_id}: {exc}")
+
+            # Generic outbound webhook — the "alerts out to anywhere" sink.
+            out_webhook = project.get("webhook_url") if project else None
+            webhook_level = (project.get("webhook_anomaly_level") or "critical") if project else "critical"
+            if not suppress_alerts and out_webhook and webhook_level != "none":
+                if webhook_level == "warning" or result.triggered:
+                    from services.webhook_service import send_anomaly_webhook
+                    send_anomaly_webhook(out_webhook, project.get("webhook_secret"), payload, result, project)
+
+            # Systemic-incident detection — is this a one-off or a macro trend?
+            # For each fired code, check whether the same (step, code) is now
+            # hitting many runs at once. An incident fires ONE high-severity alert
+            # (deduped in systemic_service), so it cuts noise rather than adding.
+            if not suppress_alerts and project and project.get("systemic_enabled", True):
+                from services.systemic_service import maybe_open_incident, WINDOW_MIN, MIN_RUNS
+                window_min = project.get("systemic_window_min") or WINDOW_MIN
+                min_runs   = project.get("systemic_min_runs") or MIN_RUNS
+                for code in result.error_map:
+                    incident = maybe_open_incident(project["id"], payload.step_name, code,
+                                                   window_min=window_min, min_runs=min_runs)
+                    if not incident:
+                        continue
+                    from anomaly import CONDITION_REGISTRY
+                    cond_name = CONDITION_REGISTRY[code].name if code in CONDITION_REGISTRY else ""
+                    if out_webhook:
+                        from services.webhook_service import send_systemic_webhook
+                        send_systemic_webhook(out_webhook, project.get("webhook_secret"), incident, project)
+                    slack_hook = project.get("slack_webhook_url")
+                    if slack_hook:
+                        from services.slack_service import send_systemic_alert
+                        send_systemic_alert(slack_hook, project.get("name", "unknown"), project["id"],
+                                            payload.step_name, cond_name, code,
+                                            incident.run_count, incident.window_min)
+    except Exception:
+        log.error(f"[ingest] anomaly detection failed for run {payload.run_id}", exc_info=True)
 
 
-def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str) -> None:
+def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None, trace_id: str, suppress_alerts: bool = False) -> None:
     """Fingerprint first to get step_profile_id, then run anomaly detection with it.
     Keeps them in one thread so anomaly detection gets per-step baselines."""
     step_profile_id: str | None = None
-    behavior_vector: list[float] | None = None
-    system_prompt: str | None = None
-    profile_status: str | None = None
 
     if payload.project_id:
         try:
-            from anomaly.prompt_kernel import extract_system_prompt
-            from anomaly.layers.layer_3_behavioral import (
-                build_behavior_vector,
-                classify_goal_type,
-            )
-            from services.embedding_service import embed
             from services.fingerprinter import match_or_create_profile
-
-            system_prompt = payload.system or extract_system_prompt(payload.raw_prompt)
-            profile_id, profile_status = match_or_create_profile(
+            profile_id, _ = match_or_create_profile(
                 project_id=payload.project_id,
                 step_name=payload.step_name,
                 kernel=payload.kernel(),
@@ -414,68 +459,48 @@ def _run_fingerprint_then_anomaly(payload: CanonicalTrace, project: dict | None,
                 get_client().table("CALLS").update(
                     {"step_profile_id": profile_id}
                 ).eq("id", trace_id).execute()
+        except Exception:
+            log.error("[fingerprint] failed", exc_info=True)
 
-                goal_type = classify_goal_type(system_prompt)
-                if profile_status == "new":
-                    get_client().table("step_profiles").update(
-                        {"goal_type": goal_type}
-                    ).eq("id", profile_id).execute()
-
-                call_input = CallInput(
-                    step_name=payload.step_name,
-                    model=payload.model,
-                    prompt=payload.instruction_text(),
-                    system_prompt=system_prompt,
-                    input_tokens=payload.input_tokens,
-                    output_tokens=payload.output_tokens,
-                    reasoning_tokens=payload.reasoning_tokens,
-                    total_tokens=payload.total_tokens,
-                    latency_ms=payload.latency_ms,
-                    cost=payload.cost,
-                    status_success=payload.status_success,
-                    error=payload.error,
-                    output_code=payload.output_text,
-                    run_id=payload.run_id,
-                    project_id=payload.project_id,
-                )
-                behavior_vector = build_behavior_vector(
-                    call_input, embed, system_prompt=system_prompt, goal_type=goal_type,
-                )
-                get_client().table("CALLS").update(
-                    {"behavior_vector": behavior_vector}
-                ).eq("id", trace_id).execute()
-        except Exception as exc:
-            print(f"[fingerprint] failed: {exc}")
-
-    _run_anomaly_detection(
-        payload,
-        project,
-        step_profile_id=step_profile_id,
-        trace_id=trace_id,
-        behavior_vector=behavior_vector,
-        system_prompt=system_prompt,
-    )
+    _run_anomaly_detection(payload, project, step_profile_id=step_profile_id, trace_id=trace_id, suppress_alerts=suppress_alerts)
 
     # Induce/refresh the step's output contract from history for future calls.
     if step_profile_id:
         try:
             from services.contract_service import maybe_learn_contract
             maybe_learn_contract(step_profile_id)
-        except Exception as exc:
-            print(f"[contract] induction failed for profile={step_profile_id}: {exc}")
+        except Exception:
+            log.error(f"[contract] induction failed for profile={step_profile_id}", exc_info=True)
 
 
-def process_canonical(trace: CanonicalTrace, project: dict | None) -> str:
+def process_canonical(trace: CanonicalTrace, project: dict | None, suppress_alerts: bool = False, synchronous: bool = False) -> str:
     """Persist a canonical trace and kick off fingerprinting, anomaly detection,
-    and Slack alerts in background threads. Shared entry point for every ingest
-    source (SDK payloads, OTLP, imports). Returns the new CALLS row id."""
+    and Slack alerts. Shared entry point for every ingest source (SDK payloads,
+    OTLP, imports). Returns the new CALLS row id.
+
+    suppress_alerts=True still fingerprints, scores, and builds baselines but
+    fires no Slack/Sentry — used by historical imports so backfilling months of
+    old traffic doesn't blast a channel with stale alerts.
+
+    synchronous=True runs fingerprint/anomaly inline instead of in a background
+    thread. Imports use it so a batch of thousands doesn't spawn a thread per
+    call and so baselines build in the order the caller feeds rows (chronological
+    for a backfill) rather than racing."""
     trace.project_id = project["id"] if project else None
 
     trace_id = ingest_trace(trace)
 
-    threading.Thread(target=_run_fingerprint_then_anomaly, args=(trace, project, trace_id), daemon=True).start()
+    if synchronous:
+        _run_fingerprint_then_anomaly(trace, project, trace_id, suppress_alerts=suppress_alerts)
+    else:
+        threading.Thread(
+            target=_run_fingerprint_then_anomaly,
+            args=(trace, project, trace_id),
+            kwargs={"suppress_alerts": suppress_alerts},
+            daemon=True,
+        ).start()
 
-    if project:
+    if project and not suppress_alerts:
         threading.Thread(target=_fire_slack, args=(project, trace), daemon=True).start()
 
     return trace_id

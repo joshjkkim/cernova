@@ -1,17 +1,20 @@
-"""End-to-end tests for evaluate_call — one call per layer.
+"""End-to-end tests for evaluate_call — one scenario per active layer.
 
-Each scenario is crafted to pass cleanly through the earlier layers and then be
-flagged at exactly one target layer, so the short-circuit stops there:
+The engine scores layers cumulatively (hard_failures -> output_format ->
+numeric_thresholds -> statistical_baseline) and only triggers once total_score
+crosses the threshold. A hard failure is heavy enough to trigger on its own (and
+short-circuits); a single output_format or numeric_thresholds breach is detected
+as a sub-threshold warning. (An earlier heuristic shape layer was removed from
+the pipeline — see evaluator.py.)
 
-    L1 — hard failure        (status_success=False)        -> stops at L1_hard
-    L2 — JSON contract        (asks JSON, returns prose)     -> stops at L2_format
-    L3 — behavioral drift     (vector far from centroid)     -> stops at L3_behavioral
-    L4 — numeric thresholds   (latency/tokens/cost/ratio)    -> stops at L4_integers
+    hard_failures       (status_success=False)       -> triggers, stops at hard_failures
+    output_format        (asks JSON, returns prose)   -> 2001 detected, sub-threshold
+    numeric_thresholds   (latency/tokens/cost/ratio)  -> 4001-4004 detected, sub-threshold
 
 Runnable two ways:
 
-    cd anomaly && pytest
-    ../backend/.venv/bin/python tests/test_evaluator.py   # prints each EvalResult
+    cd backend && pytest anomaly/tests/test_evaluator.py
+    cd backend && .venv/bin/python anomaly/tests/test_evaluator.py   # prints each EvalResult
 """
 
 from __future__ import annotations
@@ -19,19 +22,15 @@ from __future__ import annotations
 import os
 import sys
 
+# Allow running directly (no install) by putting the backend root on sys.path
+# so the `anomaly` package (and its relative imports) resolves.
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 from anomaly.config import EvalConfig
 from anomaly.evaluator import evaluate_call
-from anomaly.schemas import BehaviorBaseline, CallInput
+from anomaly.schemas import CallInput
 
 CFG = EvalConfig()
-
-
-def _unit_vector(dim: int, index: int = 0) -> list[float]:
-    vec = [0.0] * dim
-    vec[index] = 1.0
-    return vec
 
 
 # --- scenario builders ----------------------------------------------------
@@ -45,7 +44,7 @@ def clean_call() -> CallInput:
         input_tokens=12, output_tokens=1, reasoning_tokens=0, total_tokens=13,
         latency_ms=140, cost=0.0002,
         status_success=True, error=None, output_code="no",
-        run_id="run_clean", project_id="1",
+        run_id="run_clean", project_id="proj_1",
     )
 
 
@@ -58,7 +57,7 @@ def l1_call() -> CallInput:
         input_tokens=12, output_tokens=1, reasoning_tokens=0, total_tokens=13,
         latency_ms=140, cost=0.0002,
         status_success=False, error=None, output_code="no",
-        run_id="run_l1", project_id="1",
+        run_id="run_l1", project_id="proj_1",
     )
 
 
@@ -72,40 +71,15 @@ def l2_call() -> CallInput:
         latency_ms=320, cost=0.0006,
         status_success=True, error=None,
         output_code="Sure! The name is Bob and the age is 30.",
-        run_id="run_l2", project_id="1",
-    )
-
-
-def l3_call() -> CallInput:
-    """Behavioral drift: vector orthogonal to baseline centroid (3010)."""
-    return CallInput(
-        step_name="classify-intent",
-        model="claude-haiku-4-5",
-        prompt="Classify the user message into billing or support.",
-        input_tokens=18, output_tokens=2, reasoning_tokens=0, total_tokens=20,
-        latency_ms=300, cost=0.0005,
-        status_success=True, error=None, output_code="billing",
-        run_id="run_l3", project_id="1",
-        behavior_vector=_unit_vector(778, 1),
-    )
-
-
-def l3_config() -> EvalConfig:
-    return EvalConfig(
-        behavior_baseline=BehaviorBaseline(
-            sample_count=25,
-            centroid=_unit_vector(778, 0),
-            goal_type="Extract",
-        ),
-        behavior_drift_threshold=0.35,
-        threshold=35.0,
+        run_id="run_l2", project_id="proj_1",
     )
 
 
 def l4_call() -> CallInput:
     """Numeric thresholds: a draft step that blew past latency, token, cost and
     ratio limits — fires 4001 + 4002 + 4003 + 4004. No contract/shape wording,
-    so L1/L2/L3 stay silent and the run reaches L4. The body length is chosen so
+    so hard_failures/output_format stay silent and the run reaches
+    numeric_thresholds. The body length is chosen so
     chars-per-token stays plausible (no 4009 noise)."""
     body = "word " * 40_000  # 200_000 chars / 80_000 tokens = 2.5 chars/token
     return CallInput(
@@ -115,7 +89,7 @@ def l4_call() -> CallInput:
         input_tokens=1_000, output_tokens=80_000, reasoning_tokens=0, total_tokens=81_000,
         latency_ms=20_000, cost=3.5,
         status_success=True, error=None, output_code=body,
-        run_id="run_l4", project_id="1",
+        run_id="run_l4", project_id="proj_1",
     )
 
 
@@ -132,40 +106,36 @@ def test_clean_call_is_clean():
 def test_l1_stops_at_hard():
     r = evaluate_call(l1_call(), CFG)
     assert r.triggered
-    assert r.stopped_at_layer == "L1_hard"
+    assert r.stopped_at_layer == "hard_failures"
     assert 1001 in r.error_map
     assert r.total_score >= r.threshold
 
 
-def test_l2_stops_at_format():
-    r = evaluate_call(l2_call(), EvalConfig(threshold=50.0))
-    assert r.triggered
-    assert r.stopped_at_layer == "L2_format"
+def test_l2_format_detected():
+    # Prompt asks for JSON, output is prose -> L2 fires 2001. On its own this is a
+    # sub-threshold warning (50 pts < threshold), detected but not triggered.
+    r = evaluate_call(l2_call(), CFG)
     assert 2001 in r.error_map
+    assert not r.triggered
     assert r.hits[0].step_name == "extract-fields"
-    assert all(h.layer == "L2_format" for h in r.hits)
+    # Only output_format fired (hard_failures stayed silent).
+    assert all(h.layer == "output_format" for h in r.hits)
 
 
-def test_l3_stops_at_behavioral():
-    r = evaluate_call(l3_call(), l3_config())
-    assert r.triggered
-    assert r.stopped_at_layer == "L3_behavioral"
-    assert 3010 in r.error_map
-    assert all(h.layer == "L3_behavioral" for h in r.hits)
-
-
-def test_l4_stops_at_integers():
-    r = evaluate_call(l4_call(), EvalConfig(threshold=55.0))
-    assert r.triggered
-    assert r.stopped_at_layer == "L4_integers"
+def test_l4_integers_detected():
+    # Latency/token/cost/ratio breaches each fire an L4 code. Together they are a
+    # sub-threshold warning (< threshold) — detected but not triggered.
+    r = evaluate_call(l4_call(), CFG)
     assert {4001, 4002, 4003, 4004} <= set(r.error_map)
-    assert all(h.layer == "L4_integers" for h in r.hits)
+    assert not r.triggered
+    # Only numeric_thresholds fired (hard_failures + output_format stayed silent).
+    assert all(h.layer == "numeric_thresholds" for h in r.hits)
 
 
 # --- minimal runner so this works without pytest + prints the outputs -----
 
-def _show(title: str, payload: CallInput, config: EvalConfig | None = None) -> None:
-    r = evaluate_call(payload, config or CFG)
+def _show(title: str, payload: CallInput) -> None:
+    r = evaluate_call(payload, CFG)
     print(f"\n=== {title} ===")
     print(f"  triggered        : {r.triggered}")
     print(f"  total_score      : {r.total_score}  (threshold {r.threshold})")
@@ -192,10 +162,10 @@ if __name__ == "__main__":
             print(f"PASS  {t.__name__}")
     print(f"\n{passed}/{len(tests)} passed")
 
+    # Print the full EvalResult for each layer's scenario.
     _show("clean (passes all layers)", clean_call())
     _show("L1 — hard failure", l1_call())
     _show("L2 — JSON contract violation", l2_call())
-    _show("L3 — behavioral drift", l3_call(), l3_config())
     _show("L4 — numeric thresholds", l4_call())
 
     sys.exit(0 if passed == len(tests) else 1)

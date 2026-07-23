@@ -1,492 +1,744 @@
 'use client'
 
 import Link from 'next/link'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useMemo, type ReactNode } from 'react'
 
-// ── Demo data ─────────────────────────────────────────────────────────────────
+// ── Design system: "Amethyst" ────────────────────────────────────────────────
+// A mineralogist's field journal: deep plum paper, lavender ink, violet for
+// the brand (cut like a crystal, never glowing), red ink reserved strictly
+// for anomalies. Newsreader serif for headlines and body, Courier Prime
+// typewriter for data, codes, and captions. Figures and tables presented like
+// a technical journal; crystals drawn as engraved plates. No gradients, no
+// glass, no glow — the anomaly grammar is proofreader's ink:
+//   red ink = fired / critical · gold highlighter = drifting · ink ✓ = clean
+//   violet = Cernova itself — the brand and the primary action, nothing else
+//
+// Surface tiers: PAPER (page) → STRIP (bands) → STAGE (product figures, a
+// cooler, lifted indigo so the mocks read as content-on-stage, not more wall).
+//
+// This page sells the OUTCOME, not the mechanism. Purpose first (NN/g): brand,
+// what-it-is, and proof land above the fold without waiting on animation.
 
-type DemoKey = 'ok' | 'latency' | 'json' | 'tokens'
-interface Line { text: string; c?: string }
+const INK = '#e9e4f0'      // lavender-white — everything written
+const RED = '#e0533d'      // anomaly red — fired conditions only
+const VIOLET = '#b794f4'   // brand + primary CTA — nowhere else
+const PAPER = '#201a2b'    // deep plum
+const HILITE = '#d9c964'   // gold highlighter for drift
+const STAGE = '#272c4a'    // cooler, lifted panel — product figures only
+const STAGE_LINE = '#3f466e'
+const STAGE_WELL = '#303757'
 
-const DEMOS: Record<DemoKey, { label: string; lines: Line[] }> = {
-  ok: {
-    label: 'clean run',
-    lines: [
-      { text: '[tracer] connected  project=acme-ai', c: 'text-gray-600' },
-      { text: '' },
-      { text: '→ run:a3f9  classify-intent    ok    84ms    12tk  $0.000012', c: 'text-gray-300' },
-      { text: '→ run:a3f9  extract-context    ok   340ms    89tk  $0.000089', c: 'text-gray-300' },
-      { text: '→ run:a3f9  generate-reply     ok  1240ms   312tk  $0.000624', c: 'text-gray-300' },
-      { text: '' },
-      { text: '3 steps · 1664ms · 413tk · $0.000725', c: 'text-gray-600' },
-      { text: 'score: 0pts  ✓ clean', c: 'text-green-400' },
-    ],
-  },
-  latency: {
-    label: 'slow call',
-    lines: [
-      { text: '→ run:b2c1  classify-intent    ok    91ms    12tk', c: 'text-gray-500' },
-      { text: '→ run:b2c1  extract-context    ??  8400ms     3tk', c: 'text-yellow-300' },
-      { text: '' },
-      { text: '  baseline: Q1=240ms  Q3=340ms  log-IQR=0.35  (n=52)', c: 'text-gray-600' },
-      { text: '  upper fence: e^(log(Q3) + 2.5×IQR) = 510ms', c: 'text-gray-600' },
-      { text: '  log(8400) is +4.1 IQR-widths above fence', c: 'text-gray-600' },
-      { text: '' },
-      { text: '  ↳ L5:5001  latency_iqr_fence  +4.1×IQR  +30pts', c: 'text-violet-400' },
-      { text: '  ↳ L4:4007  high_latency_low_output        +20pts', c: 'text-blue-400' },
-      { text: '' },
-      { text: 'score: 50pts  ⚠ warning  →  #prod-alerts', c: 'text-yellow-400' },
-    ],
-  },
-  json: {
-    label: 'json error',
-    lines: [
-      { text: '→ run:c4d8  parse-entities', c: 'text-gray-500' },
-      { text: '' },
-      { text: '  prompt:  "extract entities, return JSON"', c: 'text-gray-600' },
-      { text: '  output:  "Sure! Based on the message..."', c: 'text-red-300' },
-      { text: '' },
-      { text: '  ↳ L2:2001  json_contract_violation  +50pts', c: 'text-orange-400' },
-      { text: '  ↳ L2:2002  json_strict_violation    +60pts', c: 'text-orange-400' },
-      { text: '' },
-      { text: 'score: 110pts  ✗ TRIGGERED', c: 'text-red-400' },
-    ],
-  },
-  tokens: {
-    label: 'token spike',
-    lines: [
-      { text: '→ run:d5e9  classify-intent', c: 'text-gray-500' },
-      { text: '' },
-      { text: '  baseline: Q1=10tk  Q3=14tk  log-IQR=0.34  (n=67)', c: 'text-gray-600' },
-      { text: '  observed: 847tk', c: 'text-red-300' },
-      { text: '  log(847) is +7.8 IQR-widths above fence', c: 'text-gray-600' },
-      { text: '' },
-      { text: '  ↳ L5:5002  tokens_iqr_fence  +7.8×IQR  +25pts', c: 'text-violet-400' },
-      { text: '  ↳ L4:4005  classify_step_token_bloat   +25pts', c: 'text-blue-400' },
-      { text: '' },
-      { text: 'score: 50pts  ⚠ flagged', c: 'text-yellow-400' },
-    ],
-  },
+// ── Motion: gentle reveal on scroll (below the fold only) ────────────────────
+
+function Reveal({ children, delay = 0, className = '' }: { children: ReactNode; delay?: number; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [seen, setSeen] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) {
+      setSeen(true)
+      return
+    }
+    const rect = el.getBoundingClientRect()
+    if (typeof IntersectionObserver === 'undefined' || rect.top < (window.innerHeight || 800)) {
+      setSeen(true)
+      return
+    }
+    const io = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setSeen(true); io.disconnect() } },
+      { threshold: 0.12 },
+    )
+    io.observe(el)
+    return () => io.disconnect()
+  }, [])
+  return (
+    <div
+      ref={ref}
+      className={className}
+      style={{
+        opacity: seen ? 1 : 0,
+        transform: seen ? 'none' : 'translateY(14px)',
+        transition: `opacity .7s ease ${delay}ms, transform .7s ease ${delay}ms`,
+      }}
+    >
+      {children}
+    </div>
+  )
 }
 
-// ── Layer data ────────────────────────────────────────────────────────────────
+// ── Editorial primitives ──────────────────────────────────────────────────────
 
-type LayerKey = 'L1' | 'L2' | 'L4' | 'L5'
-
-const LAYERS: Record<LayerKey, {
-  name: string; accent: string; desc: string; example: Line[]
-}> = {
-  L1: {
-    name: 'Hard failures',
-    accent: 'text-red-400',
-    desc: 'Deterministic. Fires on status_success=false, non-empty error, token mismatch, negative values. Any hit → 100pts → immediate trigger. No heuristics.',
-    example: [
-      { text: 'status_success: false', c: 'text-red-400' },
-      { text: 'error: "context_length_exceeded"', c: 'text-red-300' },
-      { text: '' },
-      { text: '↳ 1001  status_failure   +100pts  TRIGGERED', c: 'text-red-400' },
-    ],
-  },
-  L2: {
-    name: 'Format violations',
-    accent: 'text-orange-400',
-    desc: 'Prompt-implied contracts. "Return JSON" → output must be JSON. Yes/no prompts. Enum constraints. Strict JSON (no markdown fences). Caught before anything else runs.',
-    example: [
-      { text: 'prompt:  "return JSON with keys: name, email"', c: 'text-gray-600' },
-      { text: 'output:  "The user appears to be asking..."', c: 'text-orange-300' },
-      { text: '' },
-      { text: '↳ 2001  json_contract_violation  +50pts', c: 'text-orange-400' },
-    ],
-  },
-  L4: {
-    name: 'Numeric limits',
-    accent: 'text-blue-400',
-    desc: 'Adaptive p95 thresholds for latency, tokens, cost — scoped to each step\'s profile. Cross-field plausibility. Stall detection. Defers to L5 on 4001/4002/4003 once a baseline is warm.',
-    example: [
-      { text: 'latency_ms:    8400', c: 'text-blue-300' },
-      { text: 'output_tokens: 3', c: 'text-blue-300' },
-      { text: '' },
-      { text: '↳ 4007  high_latency_low_output  +20pts', c: 'text-blue-400' },
-    ],
-  },
-  L5: {
-    name: 'Statistical baseline',
-    accent: 'text-violet-400',
-    desc: 'IQR/log-normal detection against each step\'s own call history. Tukey fence computed in log space — catches multiplicative outliers (5× slower) that z-scores miss when past spikes inflate std. Activates after 20 clean calls.',
-    example: [
-      { text: 'baseline: Q1=240ms  Q3=340ms  log-IQR=0.35', c: 'text-gray-600' },
-      { text: 'upper fence: e^(log(Q3) + 2.5×IQR) ≈ 510ms', c: 'text-gray-600' },
-      { text: 'observed: 1840ms  →  +3.2×IQR past fence', c: 'text-violet-300' },
-      { text: '' },
-      { text: '↳ 5001  latency_iqr_fence  +3.2×IQR  +30pts', c: 'text-violet-400' },
-    ],
-  },
+function Kicker({ children }: { children: ReactNode }) {
+  return (
+    <p className="f-type text-[11px] font-bold uppercase tracking-[0.28em] text-[#c9c2d6]">{children}</p>
+  )
 }
 
-// ── Components ────────────────────────────────────────────────────────────────
+function CrystalPlate() {
+  return (
+    <figure className="inline-block">
+      <svg width="300" height="150" viewBox="0 0 300 150" aria-hidden="true" className="block mx-auto max-w-full">
+        <polygon points="28,132 272,132 252,146 48,146" fill="none" stroke={INK} strokeWidth="1.2" opacity="0.5" />
+        <g stroke={VIOLET} strokeWidth="1.6" strokeLinejoin="miter">
+          <polygon points="36,132 48,100 60,132" fill={VIOLET} fillOpacity="0.10" />
+          <polygon points="52,132 70,52 88,132" fill={VIOLET} fillOpacity="0.14" />
+          <polygon points="88,132 118,18 150,132" fill={VIOLET} fillOpacity="0.20" />
+          <polygon points="150,132 178,60 202,132" fill={VIOLET} fillOpacity="0.14" />
+          <polygon points="202,132 222,92 240,132" fill={VIOLET} fillOpacity="0.10" />
+        </g>
+        <g stroke={VIOLET} strokeWidth="0.8" opacity="0.6" fill="none">
+          <path d="M48 100 L50 132 M70 52 L74 132 M118 18 L112 132 M118 18 L136 132 M178 60 L182 132 M222 92 L224 132" />
+        </g>
+      </svg>
+      <figcaption className="f-type text-[10px] uppercase tracking-[0.2em] text-[#9a91ad] mt-3 text-center">Plate I — Amethyst · formed under pressure, sharp on arrival</figcaption>
+    </figure>
+  )
+}
 
-function Terminal() {
-  const [demo, setDemo] = useState<DemoKey>('ok')
-  const [visible, setVisible] = useState(0)
-  const [running, setRunning] = useState(false)
+function SectionHead({ no, kicker, title, aside }: { no: string; kicker: string; title: ReactNode; aside?: ReactNode }) {
+  return (
+    <Reveal>
+      <div className="border-t-2 border-[#e9e4f0] pt-5 mb-14">
+        <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+          <div>
+            <Kicker>{`${no} — ${kicker}`}</Kicker>
+            <h2 className="f-news font-bold text-5xl sm:text-6xl text-[#e9e4f0] mt-5 leading-[1.02] tracking-tight">{title}</h2>
+          </div>
+          {aside && <p className="f-news italic text-[17px] text-[#9a91ad] max-w-sm lg:text-right leading-7">{aside}</p>}
+        </div>
+      </div>
+    </Reveal>
+  )
+}
 
-  function run(key: DemoKey) {
-    setDemo(key); setVisible(0); setRunning(true)
+function InkButton({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-block f-type text-[13px] font-bold uppercase tracking-[0.14em] px-7 py-3.5 bg-[#b794f4] text-[#201a2b] shadow-[5px_5px_0_#e9e4f0] hover:translate-x-[3px] hover:translate-y-[3px] hover:shadow-[2px_2px_0_#e9e4f0] transition-all duration-150"
+    >
+      {children}
+    </Link>
+  )
+}
+
+function DocsLink({ children = 'How it works →' }: { children?: ReactNode }) {
+  return (
+    <Link href="/docs" className="f-type text-[11px] uppercase tracking-[0.14em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">
+      {children}
+    </Link>
+  )
+}
+
+// ── FIG. 1 — a run with a SILENT failure ─────────────────────────────────────
+// Hard failures all pass — nothing a log or APM flags. But drift still slips
+// through: generate-reply answers a billing question with store hours. Cernova
+// catches the break, then says what broke, why, and the fix. Opens on the full
+// diagnosed frame (the whole story at a glance); the sequence only animates
+// when the reader asks it to.
+
+interface LiveStep { name: string; ms: number }
+
+const RUN_STEPS: LiveStep[] = [
+  { name: 'classify-intent',  ms: 84 },
+  { name: 'retrieve-context', ms: 210 },
+  { name: 'generate-reply',   ms: 910 },
+]
+
+const FINAL_PHASE = 5 // 0 ask · 1–3 steps land (all 200) · 4 flagged · 5 diagnosed + pushed
+
+function LiveRun() {
+  const [phase, setPhase] = useState(FINAL_PHASE) // meaningful static first frame
+  const [playing, setPlaying] = useState(false)
+
+  useEffect(() => {
+    if (!playing) return
+    if (phase >= FINAL_PHASE) { setPlaying(false); return }
+    const delays = [1000, 800, 800, 1600, 1500]
+    const t = setTimeout(() => setPhase(p => p + 1), delays[phase])
+    return () => clearTimeout(t)
+  }, [phase, playing])
+
+  const replay = () => {
+    if (playing) { setPlaying(false); return }
+    setPhase(0)
+    setPlaying(true)
   }
 
-  useEffect(() => { run('ok') }, [])
-  useEffect(() => {
-    if (!running) return
-    const n = DEMOS[demo].lines.length
-    if (visible >= n) { setRunning(false); return }
-    const t = setTimeout(() => setVisible(v => v + 1), 60)
-    return () => clearTimeout(t)
-  }, [running, visible, demo])
+  const shownSteps = Math.min(phase, 3)
+  const flagged = phase >= 4
+  const diagnosed = phase >= 5
 
   return (
-    <div>
-      <div className="flex gap-2 mb-3">
-        {(Object.keys(DEMOS) as DemoKey[]).map((k) => (
+    <figure>
+      <div className="border-2 border-[#e9e4f0]" style={{ background: STAGE, boxShadow: '7px 7px 0 #e9e4f0' }}>
+        <div className="flex items-center justify-between px-5 py-2.5 border-b-2 border-[#e9e4f0]">
+          <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9e4f0]">Fig. 1 — run:a3f9 · support-agent</span>
           <button
-            key={k}
-            onClick={() => run(k)}
-            className={[
-              'px-3 py-1 text-[11px] font-mono border transition-colors',
-              demo === k
-                ? 'border-violet-500 bg-violet-500/10 text-violet-300'
-                : 'border-white/10 text-gray-600 hover:text-gray-400 hover:border-white/20',
-            ].join(' ')}
+            onClick={replay}
+            className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors"
+            aria-label={playing ? 'Pause the run replay' : 'Replay the run'}
           >
-            {DEMOS[k].label}
+            {playing ? '◼ pause' : '↺ replay'}
           </button>
-        ))}
+        </div>
+
+        <div className="p-6 space-y-3 min-h-[340px]">
+          <div className="f-type text-[12px] text-[#9a91ad] border-l-2 pl-3 leading-6" style={{ borderColor: STAGE_LINE }}>
+            user — &ldquo;my invoice is wrong, I was double-charged&rdquo;
+          </div>
+
+          <div className="space-y-1.5 pt-1">
+            {RUN_STEPS.slice(0, shownSteps).map((s, i) => {
+              const red = s.name === 'generate-reply' && flagged
+              return (
+                <div key={i} className="flex items-center justify-between f-type text-[12px]">
+                  <span style={{ color: red ? RED : INK }} className={red ? 'font-bold' : ''}>
+                    {red ? '✕' : '✓'} {s.name}
+                  </span>
+                  <span className="text-[#9a91ad]">200 · {s.ms}ms</span>
+                </div>
+              )
+            })}
+          </div>
+
+          {phase >= 3 && (
+            <div className="border p-3 f-type text-[12px] text-[#c9c2d6] leading-6" style={{ borderColor: STAGE_LINE, background: STAGE_WELL }}>
+              &ldquo;Our store is open 9 am–10 pm on weekdays! Hope to see you soon.&rdquo;
+              {flagged && (
+                <div className="mt-2 pt-2 border-t text-[11px] font-bold" style={{ borderColor: STAGE_LINE, color: RED }}>
+                  ↳ nothing generate-reply ever says to a billing question
+                </div>
+              )}
+            </div>
+          )}
+
+          {diagnosed && (
+            <div className="border-l-2 pl-3 space-y-1 f-type text-[11px]" style={{ borderColor: RED }}>
+              <div><span className="text-[#9a91ad]">what broke — </span><span className="text-[#e9e4f0] font-bold">generate-reply</span></div>
+              <div><span className="text-[#9a91ad]">why — </span><span className="text-[#c9c2d6]">retrieval returned store info, not billing — the reply answered the wrong context</span></div>
+              <div><span className="text-[#9a91ad]">fix — </span><span className="text-[#e9e4f0]">scope the retriever to billing docs for invoice intents</span></div>
+            </div>
+          )}
+        </div>
+
+        <div className="border-t-2 border-[#e9e4f0] px-5 sm:px-6 py-4">
+          {diagnosed ? (
+            <div className="space-y-2">
+              <div className="f-type text-[10px] sm:text-[11px] font-bold uppercase tracking-[0.18em] text-[#9a91ad]">
+                status
+              </div>
+              <p className="f-type text-[14px] sm:text-[15px] font-bold leading-snug tracking-wide" style={{ color: RED }}>
+                Diagnosed · pushed to #prod · ready for review
+              </p>
+            </div>
+          ) : (
+            <div className="flex items-center justify-between gap-3 f-type text-[11px] sm:text-[12px]">
+              <span className="uppercase tracking-[0.18em] text-[#9a91ad]">status</span>
+              <span className="font-bold text-right" style={{ color: flagged ? RED : INK }}>
+                {flagged ? 'silent failure caught' : phase >= 3 ? 'all steps 200 OK ✓' : 'watching…'}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
-      <div className="border border-white/10 bg-black p-5 font-mono text-xs leading-6 min-h-52">
-        {DEMOS[demo].lines.slice(0, visible).map((l, i) => (
-          <div key={i} className={l.c ?? 'text-gray-400'}>{l.text || ' '}</div>
-        ))}
-        {running && <span className="inline-block w-2 h-3.5 bg-violet-400 animate-pulse" />}
-      </div>
-    </div>
+      <figcaption className="f-type text-[11px] text-[#9a91ad] mt-3 leading-5">
+        Fig. 1 — Every step passed every <b>hard failure</b> check — but drift still slipped through. {diagnosed ? 'Cernova diagnosed it, pushed the fix to #prod, and left it ready for review.' : flagged ? 'Cernova caught the break your logs can’t see.' : 'Nothing a log or dashboard would flag.'}
+      </figcaption>
+    </figure>
   )
 }
 
-function LayerExplorer() {
-  const [active, setActive] = useState<LayerKey | null>(null)
-  const layers = Object.keys(LAYERS) as LayerKey[]
-  return (
-    <div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/8">
-        {layers.map((k) => {
-          const l = LAYERS[k]
-          const on = active === k
-          return (
-            <button
-              key={k}
-              onClick={() => setActive(on ? null : k)}
-              className={[
-                'p-5 text-left transition-colors',
-                on ? 'bg-white text-black' : 'bg-[#000] hover:bg-white/4',
-              ].join(' ')}
-            >
-              <div className={`text-xs font-bold font-mono mb-1 ${on ? 'text-black' : l.accent}`}>{k}</div>
-              <div className={`text-sm font-sans font-bold ${on ? 'text-black' : 'text-white'}`}>{l.name}</div>
-              <div className={`text-[10px] font-mono mt-3 ${on ? 'text-gray-600' : 'text-gray-700'}`}>
-                {on ? 'click to close' : 'click to expand →'}
-              </div>
-            </button>
-          )
-        })}
-      </div>
+// ── FIG. 2 — the steps ledger (dashboard glimpse) ─────────────────────────────
 
-      {active && (
-        <div className="border border-white/10 border-t-0 p-6 bg-[#050505]">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div>
-              <div className={`text-[10px] font-mono font-bold uppercase tracking-widest mb-3 ${LAYERS[active].accent}`}>
-                {active} — {LAYERS[active].name}
-              </div>
-              <p className="text-sm font-mono text-gray-400 leading-7">{LAYERS[active].desc}</p>
+const STEPS_HEALTH = [
+  { step: 'classify-intent',  p95: '96ms',   cost: '$0.00001', status: '✓ healthy',  hl: false, red: false },
+  { step: 'retrieve-context', p95: '410ms',  cost: '$0.00009', status: 'drifting',   hl: true,  red: false },
+  { step: 'rank-results',     p95: '240ms',  cost: '$0.00004', status: '✓ healthy',  hl: false, red: false },
+  { step: 'generate-reply',   p95: '1.6s',   cost: '$0.00062', status: 'critical',   hl: false, red: true },
+]
+
+function ProductBoard() {
+  const [tab, setTab] = useState<'steps' | 'runs'>('steps')
+  return (
+    <figure>
+      <div className="border-2 border-[#e9e4f0]" style={{ background: STAGE, boxShadow: '7px 7px 0 #e9e4f0' }}>
+        <div className="flex items-center gap-6 px-5 py-2.5 border-b-2 border-[#e9e4f0] f-type text-[11px]">
+          <span className="font-bold uppercase tracking-[0.18em] text-[#e9e4f0]">Fig. 2 — support-agent</span>
+          {(['steps', 'runs'] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)} className={`uppercase tracking-[0.14em] transition-colors ${tab === t ? 'text-[#e9e4f0] font-bold underline underline-offset-4' : 'text-[#9a91ad] hover:text-[#e9e4f0]'}`}>
+              {t}
+            </button>
+          ))}
+          <span className="ml-auto text-[#9a91ad] hidden sm:block">last 24h · 4,102 calls</span>
+        </div>
+
+        {tab === 'steps' ? (
+          <div>
+            <div className="grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-2.5 border-b border-[#e9e4f0] f-type text-[10px] font-bold text-[#e9e4f0] uppercase tracking-[0.18em]">
+              <span>step profile</span><span className="text-right w-16">p95</span><span className="text-right w-20">avg cost</span><span className="text-right w-24">trend</span>
             </div>
-            <div className="bg-black border border-white/8 p-4 font-mono text-xs leading-6">
-              {LAYERS[active].example.map((l, i) => (
-                <div key={i} className={l.c ?? 'text-gray-400'}>{l.text || ' '}</div>
-              ))}
+            {STEPS_HEALTH.map((r) => (
+              <div key={r.step} className="grid grid-cols-[1fr_auto_auto_auto] gap-4 px-5 py-3 border-b f-type text-[12px] items-center" style={{ borderColor: STAGE_LINE }}>
+                <span className="text-[#e9e4f0] truncate" style={r.hl ? { background: HILITE, color: PAPER, padding: '0 4px' } : undefined}>{r.step}</span>
+                <span className="text-[#9a91ad] text-right w-16">{r.p95}</span>
+                <span className="text-[#9a91ad] text-right w-20">{r.cost}</span>
+                <span className={`text-right w-24 ${r.red ? 'font-bold' : ''}`} style={{ color: r.red ? RED : r.hl ? '#d9a441' : INK }}>{r.status}</span>
+              </div>
+            ))}
+            <div className="px-5 py-3 f-type text-[11px] text-[#9a91ad] italic">
+              <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>retrieve-context</span> creeping slower · <span className="font-bold" style={{ color: RED }}>generate-reply</span> cost spiking
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        ) : (
+          <div className="p-5 space-y-3.5">
+            {RUN_STEPS.map((s, i) => (
+              <div key={i} className="f-type text-[12px]">
+                <div className="flex justify-between mb-1.5"><span className="text-[#e9e4f0]">{s.name}</span><span className="text-[#9a91ad]">{s.ms}ms</span></div>
+                <div className="h-2.5 border border-[#e9e4f0]/30" style={{ background: STAGE_WELL }}><div className="h-full bg-[#e9e4f0]" style={{ width: `${Math.max(6, (s.ms / 1400) * 100)}%`, marginLeft: `${i * 12}%` }} /></div>
+              </div>
+            ))}
+            <div className="f-type text-[11px] text-[#9a91ad] pt-1 italic">run:a3f9 · 3 steps · 1.20s · $0.00068 · clean ✓</div>
+          </div>
+        )}
+      </div>
+      <figcaption className="f-type text-[11px] text-[#9a91ad] mt-3 leading-5">
+        Fig. 2 — The steps ledger. Drift is <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>highlighted</span>; critical regressions are marked in <span className="font-bold" style={{ color: RED }}>red ink</span>.
+      </figcaption>
+    </figure>
   )
 }
 
-function CopyBtn({ text }: { text: string }) {
-  const [done, setDone] = useState(false)
+// ── Wire strip: plain-language silent failures (static chips, no marquee) ─────
+
+const TICKER: string[] = [
+  'hallucinated a field',
+  'returned prose where JSON was required',
+  '8× slower than usual',
+  'cost tripled overnight',
+  'dropped a required key',
+  'empty output — status 200 OK',
+  'drifted off its allowed values',
+  'silently truncated mid-answer',
+]
+
+// ── The three outcomes ────────────────────────────────────────────────────────
+
+const OUTCOMES: { no: string; head: string; body: string }[] = [
+  {
+    no: 'I',
+    head: 'Learns as your agent runs.',
+    body: 'Point Cernova at your traffic and it figures out what normal looks like for every step your app takes — no rules, no schemas, no thresholds to tune. The more it runs, the sharper it gets.',
+  },
+  {
+    no: 'II',
+    head: 'Catches what your logs call success.',
+    body: 'A prompt tweak, a model bump, a slow drift in cost or latency — the silent regressions that sail past every health check surface loud, per step, the moment they start.',
+  },
+  {
+    no: 'III',
+    head: 'Diagnoses. Fixes. Or waits for you.',
+    body: 'No dashboard to go stare at. The moment a step breaks its pattern, you get a flag — in Slack, Sentry, or your webhook — with the run, what changed, and the root cause. Then Cernova puts the fix through in real time, or holds it for your approval.',
+  },
+]
+
+// ── Starfield: an engraved night-sky plate (nova = a star, brightening) ───────
+// Printed, not glowing — tiny ink dots + a few violet cross-marks + one focal
+// "nova" burst, drawn like an antique celestial chart. Deterministic seed so
+// server and client render the same points; gentle scroll parallax for depth.
+
+function mulberry32(seed: number) {
+  return function () {
+    seed |= 0; seed = (seed + 0x6D2B79F5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+function StarField() {
+  const layer = useRef<HTMLDivElement>(null)
+  const { stars, lines } = useMemo(() => {
+    const rnd = mulberry32(20260712)
+    const W = 1440, H = 900
+    const stars = Array.from({ length: 88 }, () => {
+      const bright = rnd() < 0.15
+      return {
+        x: rnd() * W, y: rnd() * H,
+        r: bright ? 1.4 + rnd() * 1.0 : 0.5 + rnd() * 0.9,
+        violet: bright || rnd() < 0.28,
+        o: bright ? 0.4 + rnd() * 0.3 : 0.07 + rnd() * 0.15,
+        cross: bright && rnd() < 0.7,
+        dur: (4.5 + rnd() * 5).toFixed(1),   // twinkle period
+        delay: (rnd() * 6).toFixed(1),
+      }
+    })
+    const lines = [
+      [stars[3], stars[12], stars[21], stars[30]],
+      [stars[54], stars[61], stars[70]],
+    ].map(pts => pts.map(p => `${p.x.toFixed(0)},${p.y.toFixed(0)}`).join(' '))
+    return { stars, lines }
+  }, [])
+
+  // Scroll parallax on the outer layer; continuous drift lives in CSS on an
+  // inner group, so the two transforms compose without fighting.
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+    let raf = 0
+    const onScroll = () => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => {
+        if (layer.current) layer.current.style.transform = `translate3d(0, ${window.scrollY * 0.055}px, 0)`
+      })
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => { window.removeEventListener('scroll', onScroll); cancelAnimationFrame(raf) }
+  }, [])
+
   return (
-    <button
-      onClick={() => { navigator.clipboard.writeText(text); setDone(true); setTimeout(() => setDone(false), 1500) }}
-      className="text-[10px] font-mono text-gray-700 hover:text-gray-400 transition-colors"
-    >
-      {done ? 'copied ✓' : 'copy'}
-    </button>
+    <div ref={layer} className="fixed inset-0 z-0 pointer-events-none" aria-hidden="true">
+      <svg width="100%" height="100%" viewBox="0 0 1440 900" preserveAspectRatio="xMidYMid slice" className="w-full h-full">
+        <g className="skydrift">
+          <g stroke={INK} strokeOpacity="0.08" strokeWidth="0.6" fill="none">
+            {lines.map((pts, i) => <polyline key={i} points={pts} />)}
+          </g>
+          {stars.map((s, i) => s.cross ? (
+            <g key={i} className="tw" style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+               stroke={s.violet ? VIOLET : INK} strokeOpacity={s.o} strokeWidth="0.8" strokeLinecap="round">
+              <line x1={s.x - s.r * 2.6} y1={s.y} x2={s.x + s.r * 2.6} y2={s.y} />
+              <line x1={s.x} y1={s.y - s.r * 2.6} x2={s.x} y2={s.y + s.r * 2.6} />
+            </g>
+          ) : (
+            <circle key={i} className="tw" style={{ animationDuration: `${s.dur}s`, animationDelay: `${s.delay}s` }}
+              cx={s.x} cy={s.y} r={s.r} fill={s.violet ? VIOLET : INK} fillOpacity={s.o} />
+          ))}
+          {/* the nova — the Cernova logomark itself, faint and slowly brightening */}
+          <g className="nova" transform="translate(560 610) scale(0.145) translate(-256 -256)"
+             fill="none" stroke={VIOLET} strokeOpacity="0.6" strokeLinejoin="round" strokeLinecap="round">
+            <path strokeWidth="9" d="M256,32 L307,205 L480,256 L307,307 L256,480 L205,307 L32,256 L205,205 Z" />
+            <g strokeWidth="5">
+              <line x1="256" y1="32" x2="256" y2="212" /><line x1="480" y1="256" x2="300" y2="256" />
+              <line x1="256" y1="480" x2="256" y2="300" /><line x1="32" y1="256" x2="212" y2="256" />
+            </g>
+            <path strokeWidth="9" d="M256,212 L300,256 L256,300 L212,256 Z" />
+          </g>
+        </g>
+      </svg>
+    </div>
   )
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 
-export default function LandingPage() {
-  return (
-    <div className="min-h-screen bg-black text-white antialiased">
+const NAV_LINKS: { href: string; label: string }[] = [
+  { href: '/', label: 'Home' },
+  { href: '#product', label: 'Product' },
+  { href: '#install', label: 'Install' },
+  { href: '/about', label: 'About' },
+  { href: '/mission', label: 'Mission' },
+  { href: '/docs', label: 'Docs' },
+]
 
+export default function LandingPage() {
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  return (
+    <div className="min-h-screen bg-[#201a2b] text-[#e9e4f0]" style={{ fontFamily: 'var(--font-news), Georgia, serif' }}>
       <style>{`
-        @keyframes t { from { transform: translateX(0) } to { transform: translateX(-50%) } }
-        .tk { animation: t 30s linear infinite; }
-        .tk:hover { animation-play-state: paused; }
+        html { scroll-behavior: smooth; }
+        .f-news { font-family: var(--font-news), Georgia, serif; }
+        .f-type { font-family: var(--font-type), 'Courier New', monospace; }
+        ::selection { background: ${HILITE}; color: ${PAPER}; }
+        .dropcap::first-letter { float: left; font-size: 3.4em; line-height: .85; padding-right: 10px; padding-top: 4px; font-weight: 700; color: ${INK}; }
+        @keyframes nova { 0%, 100% { opacity: .5 } 50% { opacity: .95 } }
+        .nova { animation: nova 5.5s ease-in-out infinite; }
+        @keyframes skydrift { from { transform: translate(0,0) } to { transform: translate(-16px, 10px) } }
+        .skydrift { animation: skydrift 70s ease-in-out infinite alternate; }
+        @keyframes tw { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+        .tw { animation-name: tw; animation-timing-function: ease-in-out; animation-iteration-count: infinite; }
+        @media (prefers-reduced-motion: reduce) {
+          html { scroll-behavior: auto; }
+          .nova, .skydrift, .tw { animation: none !important; }
+        }
       `}</style>
 
-      {/* ── Nav ── */}
-      <nav className="fixed top-0 left-0 right-0 z-50 bg-black border-b border-white/8">
-        <div className="max-w-6xl mx-auto px-6 h-12 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2 font-sans font-black text-sm text-white">
-            <img src="/logo.svg" alt="" className="w-5 h-5" />
+      <StarField />
+      <div className="relative z-10">
+
+      {/* ── Masthead ── */}
+      <nav className="sticky top-0 z-50 bg-[#201a2b] border-b-2 border-[#e9e4f0]">
+        <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+          <Link href="/" className="flex items-center gap-3 f-news font-bold text-2xl tracking-tight text-[#e9e4f0]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="" width={28} height={28} className="shrink-0" />
             Cernova
           </Link>
-          <div className="flex items-center gap-6">
-            <a href="#detection" className="text-[11px] font-mono text-gray-600 hover:text-white transition-colors hidden sm:block">detection</a>
-            <Link href="/docs" className="text-[11px] font-mono text-gray-600 hover:text-white transition-colors hidden sm:block">docs</Link>
-            <Link href="/login" className="text-[11px] font-mono text-gray-600 hover:text-white transition-colors">sign in</Link>
-            <Link href="/login" className="text-[11px] font-mono font-bold px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white transition-colors">
-              get started →
-            </Link>
+          <div className="hidden sm:flex items-center gap-7">
+            {NAV_LINKS.map(l => (
+              <Link key={l.label} href={l.href} className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">
+                {l.label}
+              </Link>
+            ))}
+            <Link href="/login" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Sign in</Link>
+            <Link href="/login" className="f-type text-[11px] font-bold uppercase tracking-[0.14em] px-4 py-2 bg-[#b794f4] text-[#201a2b] hover:bg-[#e9e4f0] transition-colors">Start free →</Link>
           </div>
+          <button
+            className="sm:hidden f-type text-[12px] font-bold uppercase tracking-[0.16em] text-[#e9e4f0] px-2 py-1 border border-[#e9e4f0]/40"
+            onClick={() => setMenuOpen(o => !o)}
+            aria-expanded={menuOpen}
+            aria-label="Toggle navigation menu"
+          >
+            {menuOpen ? '✕ close' : '☰ menu'}
+          </button>
         </div>
+        {menuOpen && (
+          <div className="sm:hidden border-t border-[#e9e4f0]/40 bg-[#201a2b] px-6 py-4 flex flex-col gap-4">
+            {NAV_LINKS.map(l => (
+              <Link key={l.label} href={l.href} onClick={() => setMenuOpen(false)} className="f-type text-[12px] uppercase tracking-[0.16em] text-[#c9c2d6] hover:text-[#e9e4f0] transition-colors">
+                {l.label}
+              </Link>
+            ))}
+            <Link href="/login" onClick={() => setMenuOpen(false)} className="f-type text-[12px] uppercase tracking-[0.16em] text-[#c9c2d6] hover:text-[#e9e4f0] transition-colors">Sign in</Link>
+            <Link href="/login" onClick={() => setMenuOpen(false)} className="f-type text-[12px] font-bold uppercase tracking-[0.14em] px-4 py-2.5 bg-[#b794f4] text-[#201a2b] self-start">Start free →</Link>
+          </div>
+        )}
       </nav>
 
-      {/* ── Hero ── */}
-      <section className="pt-32 pb-20 px-6 border-b border-white/8">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-20 items-start">
-
-          <div>
-            <p className="font-mono text-[11px] text-gray-600 mb-8 tracking-widest uppercase">
-              the detection layer for llm pipelines · open beta
-            </p>
-            <h1 className="font-sans font-black text-6xl sm:text-7xl leading-[0.95] text-white mb-8">
-              Your LLM<br />
-              is failing.<br />
-              <span className="text-violet-500">Silently.</span>
-            </h1>
-            <p className="font-mono text-sm text-gray-500 leading-7 max-w-sm mb-10">
-              LLMs don&apos;t throw exceptions. They
-              hallucinate, return broken JSON, spike
-              costs, and drift — all while your logs
-              show green. Cernova catches it.
-            </p>
-            <div className="flex items-center gap-4">
-              <Link href="/login" className="font-mono text-sm font-bold px-6 py-3 bg-violet-600 hover:bg-violet-500 text-white transition-colors">
-                start free →
-              </Link>
-              <Link href="/docs" className="font-mono text-sm text-gray-600 hover:text-white transition-colors underline underline-offset-4">
-                read docs
-              </Link>
+      {/* ── Front page — purpose first, no animation gating ── */}
+      <section className="px-6 pt-10 pb-20">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-14 items-start">
+            <div>
+              <p className="f-news font-bold text-3xl sm:text-4xl tracking-tight mb-5" style={{ color: VIOLET }}>
+                Cernova
+              </p>
+              <h1 className="f-news font-bold text-5xl sm:text-[64px] leading-[1.02] tracking-tight text-[#e9e4f0] mb-6">
+                Anyone can build an AI agent.<br />
+                <span className="italic text-[#c9c2d6]">Keeping it working is the hard part.</span>
+              </h1>
+              <p className="f-news text-xl text-[#c9c2d6] leading-8 max-w-lg mb-10">
+                The maintenance layer for AI agents: catch silent failures, get the diagnosis and fix — without living in a trace viewer.
+              </p>
+              <div className="flex items-center gap-7 mb-12">
+                <Link href="/about" className="f-type text-[12px] uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#9a91ad] decoration-2 underline-offset-4 hover:decoration-[#e9e4f0] transition-colors">Talk to us</Link>
+                <InkButton href="/login">Sign up</InkButton>
+              </div>
+              <div className="border-y border-[#e9e4f0] py-3 f-type text-[11px] uppercase tracking-[0.16em] text-[#e9e4f0] flex flex-wrap gap-x-6 gap-y-1">
+                <span>Silent failures, <b>caught</b></span>
+                <span>·</span>
+                <span><b>~1ms</b> overhead</span>
+                <span>·</span>
+                <span><b>Nothing</b> to configure</span>
+              </div>
             </div>
-
-            <div className="mt-16 pt-8 border-t border-white/8 grid grid-cols-3 gap-6">
-              {[['< 1ms', 'overhead per call'], ['4 layers', 'of detection'], ['20 calls', 'to warm L5']].map(([v, l]) => (
-                <div key={l}>
-                  <div className="font-sans font-black text-2xl text-white">{v}</div>
-                  <div className="font-mono text-[10px] text-gray-600 mt-1">{l}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="lg:pt-4">
-            <p className="font-mono text-[10px] text-gray-700 mb-3 uppercase tracking-widest">
-              live simulation — click a scenario
-            </p>
-            <Terminal />
+            <LiveRun />
           </div>
         </div>
       </section>
 
-      {/* ── Ticker ── */}
-      <div className="border-b border-white/8 py-3 overflow-hidden bg-black">
-        <div className="flex whitespace-nowrap tk">
-          {[...Array(2)].map((_, i) => (
-            <div key={i} className="flex shrink-0">
-              {[
-                ['1001', 'status_failure', 'text-red-600'],
-                ['1007', 'token_accounting_mismatch', 'text-red-600'],
-                ['2001', 'json_contract_violation', 'text-orange-500'],
-                ['4007', 'high_latency_low_output', 'text-blue-500'],
-                ['5001', 'latency_iqr_fence', 'text-violet-500'],
-                ['5002', 'tokens_iqr_fence', 'text-violet-500'],
-                ['2003', 'enum_contract_violation', 'text-orange-500'],
-                ['4005', 'classify_step_token_bloat', 'text-blue-500'],
-                ['5003', 'cost_iqr_fence', 'text-violet-500'],
-                ['1003', 'empty_output_on_success', 'text-red-600'],
-              ].map(([code, name, c]) => (
-                <span key={code} className="inline-flex items-center gap-2.5 px-6 font-mono text-[11px]">
-                  <span className={`font-bold ${c}`}>{code}</span>
-                  <span className="text-gray-800">{name}</span>
-                  <span className="text-gray-900 mx-3">·</span>
-                </span>
-              ))}
-            </div>
+      {/* ── Wire strip — silent failures (static, no marquee) ── */}
+      <div className="border-y-2 border-[#e9e4f0] py-3 px-6 bg-[#332946]">
+        <div className="max-w-6xl mx-auto flex flex-wrap justify-center gap-x-7 gap-y-1.5">
+          {TICKER.map((phrase, j) => (
+            <span key={j} className="inline-flex items-baseline gap-2.5 f-type text-[11px] whitespace-nowrap">
+              <span className="font-bold" style={{ color: RED }}>✕</span>
+              <span className="text-[#c9c2d6]">{phrase}</span>
+            </span>
           ))}
         </div>
       </div>
 
-      {/* ── Detection engine ── */}
-      <section id="detection" className="pt-20 pb-0 px-6">
+      {/* ── § 1 — See it (the dashboard, up front) ── */}
+      <section id="product" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-3">Detection engine</p>
-              <h2 className="font-sans font-black text-4xl sm:text-5xl text-white">L1 · L2 · L4 · L5</h2>
+          <SectionHead
+            no="1"
+            kicker="See it"
+            title={<>Not your average<br />observability platform.</>}
+          />
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-14 items-start">
+            <Reveal className="lg:col-span-2">
+              <p className="dropcap f-news text-[17px] text-[#c9c2d6] leading-8 mb-6">
+                Most days you never open this. When you want the detail, every step has its own baseline — drift and critical ranked, root-cause on tap. Granularity for when you dig in; alerts and fixes carry the rest.
+              </p>
+              <p className="f-news text-[17px] text-[#c9c2d6] leading-8 mb-8">
+                Anomalies read like proofreader&apos;s marks: drift gets the <span style={{ background: HILITE, color: PAPER, padding: '0 3px' }}>highlighter</span>, regressions get <span className="font-bold" style={{ color: RED }}>red ink</span>, and healthy steps stay quietly set in parchment.
+              </p>
+              <Link href="/login" className="f-type text-[12px] font-bold uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#9a91ad] decoration-2 underline-offset-4 hover:decoration-[#e9e4f0] transition-colors">Start free and see your own steps →</Link>
+            </Reveal>
+            <Reveal delay={150} className="lg:col-span-3"><ProductBoard /></Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ── § 2 — The problem (short) ── */}
+      <section id="problem" className="px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <SectionHead
+            no="2"
+            kicker="The problem"
+            title={<>Green dashboards.<br />Broken agents.</>}
+            aside="The failures that matter most are the ones nothing alerts on."
+          />
+          <div className="grid grid-cols-1 lg:grid-cols-5 gap-14 items-start">
+            <Reveal className="lg:col-span-3">
+              <p className="dropcap f-news text-[19px] text-[#c9c2d6] leading-9">
+                Everyone knows agents fail. The usual response is to open traces and check them one by one. What you need is something that already knows why it failed, how it failed — and pushes the fix to production, ready for review.
+              </p>
+            </Reveal>
+            <Reveal delay={150} className="lg:col-span-2">
+              <blockquote className="border-l-2 border-[#e0533d] pl-6 py-2">
+                <p className="f-news italic text-[27px] sm:text-[32px] leading-[1.25] text-[#e9e4f0]">
+                  &ldquo;By the time someone reports it, it&apos;s been broken for a&nbsp;week.&rdquo;
+                </p>
+                <footer className="f-type text-[11px] uppercase tracking-[0.18em] text-[#9a91ad] mt-5">— every team shipping LLMs to production</footer>
+              </blockquote>
+            </Reveal>
+          </div>
+        </div>
+      </section>
+
+      {/* ── § 3 — What Cernova does (outcomes) ── */}
+      <section id="solution" className="px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <SectionHead
+            no="3"
+            kicker="What Cernova does"
+            title={<>It learns your app.<br />Then it watches it.</>}
+            aside="Three things — none of which you have to set up."
+          />
+          <div className="grid grid-cols-1 md:grid-cols-3 border-2 border-[#e9e4f0] bg-[#281f38]">
+            {OUTCOMES.map((o, i) => (
+              <div key={o.no} className={['p-8 border-[#e9e4f0]', i < OUTCOMES.length - 1 ? 'border-b md:border-b-0 md:border-r' : ''].join(' ')}>
+                <Reveal delay={i * 100}>
+                  <span className="f-news text-3xl italic text-[#9a91ad]">{o.no}.</span>
+                  <h3 className="f-news font-bold text-[27px] text-[#e9e4f0] mt-4 mb-3 leading-tight">{o.head}</h3>
+                  <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-6">{o.body}</p>
+                  <DocsLink />
+                </Reveal>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── Interlude — getting in ── */}
+      <section id="install" className="px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <Reveal>
+            <div className="border-t-2 border-[#e9e4f0] pt-5 mb-12">
+              <Kicker>Getting in</Kicker>
+              <h2 className="f-news font-bold text-5xl sm:text-6xl text-[#e9e4f0] mt-5 mb-4 leading-[1.02] tracking-tight">One line. Or none.</h2>
+              <p className="f-news italic text-[17px] text-[#9a91ad] max-w-xl leading-7">No ML team, no enterprise contract, no afternoon lost to setup — and no dashboard to babysit after. Two ways in; pick how you build.</p>
             </div>
-            <p className="font-mono text-xs text-gray-600 max-w-xs text-right leading-6 hidden lg:block">
-              Four layers. Each catches something different. Scores accumulate — once total ≥ 100pts, the engine stops and fires.
-            </p>
+          </Reveal>
+          <div className="grid grid-cols-1 md:grid-cols-2 border-2 border-[#e9e4f0] bg-[#281f38]">
+            <Reveal className="p-8 border-b md:border-b-0 md:border-r border-[#e9e4f0]">
+              <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#9a91ad] mb-4">Wrap your client</div>
+              <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-5">Two lines around your model client. Every call your agent makes is watched — no changes to your logic.</p>
+              <pre className="f-type text-[11px] text-[#e9e4f0] bg-[#201a2b] border border-[#3a2f4e] p-4 overflow-x-auto leading-6">{`const tracer    = new Tracer({ apiKey })
+const anthropic = tracer.wrapAnthropic(client)`}</pre>
+            </Reveal>
+            <Reveal delay={100} className="p-8">
+              <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#9a91ad] mb-4">Or hand it to your coding agent</div>
+              <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-5">Building in Cursor or Claude Code? Tell it to install Cernova and it wires every model call in your repo for you — even across a multi-agent setup.</p>
+              <pre className="f-type text-[11px] text-[#e9e4f0] bg-[#201a2b] border border-[#3a2f4e] p-4 overflow-x-auto leading-6">{`> install cernova and instrument
+  my agents`}</pre>
+            </Reveal>
           </div>
-        </div>
-        <div className="max-w-6xl mx-auto">
-          <LayerExplorer />
-        </div>
-      </section>
 
-      {/* ── Solid violet section — features ── */}
-      <section className="mt-20 bg-violet-700 py-20 px-6">
-        <div className="max-w-6xl mx-auto">
-          <p className="font-mono text-[10px] text-violet-300 uppercase tracking-widest mb-4">Everything included</p>
-          <h2 className="font-sans font-black text-4xl sm:text-5xl text-white mb-14">
-            The full stack.<br />No config files.
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-16 gap-y-0">
-            {[
-              ['Per-step cost & token tracking', 'Every call captured: tokens, latency, cost, model. Per-run Gantt waterfall. Monthly budget alerts.'],
-              ['AI root cause analysis', 'One click runs claude-sonnet over your entire run. Reads every step, every score, tells you what broke and why.'],
-              ['Step identity & profiles', 'System prompts embedded with all-MiniLM-L6-v2. Each step gets a semantic profile — L5 baselines are per-step, not project-wide.'],
-              ['Trend detection', 'Per-step health across time: warming / healthy / degrading / critical. Catches latency creep that per-call scoring misses.'],
-              ['Slack integration', 'Paste a webhook URL. Step errors, rate spikes, anomaly alerts — right in your team channel. No code.'],
-              ['Sentry integration', 'Every call as a Sentry performance transaction. Anomalies as issues, fingerprinted by step name.'],
-            ].map(([title, desc]) => (
-              <div key={title as string} className="py-6 border-b border-violet-600 last:border-b-0 md:[&:nth-child(5)]:border-b-0 md:[&:nth-child(6)]:border-b-0">
-                <div className="font-sans font-bold text-white mb-1.5 text-sm">{title}</div>
-                <div className="font-mono text-xs text-violet-200 leading-6">{desc}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* ── Works with your stack ── */}
-      <section className="py-20 px-6 border-b border-white/8">
-        <div className="max-w-6xl mx-auto">
-          <div className="flex items-end justify-between mb-8">
-            <div>
-              <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-3">Works with your stack</p>
-              <h2 className="font-sans font-black text-4xl sm:text-5xl text-white">
-                Keep your stack.<br />Add detection.
-              </h2>
+          <Reveal>
+            <div className="mt-8 border-2 border-[#e9e4f0] bg-[#332946] grid grid-cols-2 md:grid-cols-4 divide-x divide-[#e9e4f0]/30">
+              {([
+                ['≤1%', 'false alarms, proven'],
+                ['~1ms', 'added per call'],
+                ['20', 'calls to learn a step'],
+                ['minutes', 'to first detection'],
+              ] as [string, string][]).map(([n, l]) => (
+                <div key={l} className="px-5 py-6 text-center">
+                  <div className="f-news font-bold text-4xl text-[#e9e4f0]">{n}</div>
+                  <div className="f-type text-[10px] uppercase tracking-[0.16em] text-[#9a91ad] mt-2 leading-4">{l}</div>
+                </div>
+              ))}
             </div>
-            <p className="font-mono text-xs text-gray-600 max-w-xs text-right leading-6 hidden lg:block">
-              Cernova doesn&apos;t replace your observability — it sits on top. Traces in from what you already run, alerts out to where you already look.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-px bg-white/8 border border-white/8">
-            {[
-              ['Anthropic SDK', 'typescript · traces in', true],
-              ['OpenAI SDK', 'typescript · traces in', true],
-              ['LangChain', 'python · any provider', true],
-              ['Slack', 'alerts out', true],
-              ['Sentry', 'transactions + issues out', true],
-              ['OpenTelemetry', 'genai ingest', true],
-              ['Vercel AI SDK', 'telemetry ingest', true],
-              ['Langfuse import', 'warm-start baselines', false],
-            ].map(([name, sub, live]) => (
-              <div key={name as string} className="bg-black p-5">
-                <div className="flex items-center justify-between mb-1.5">
-                  <div className="font-sans font-bold text-sm text-white">{name}</div>
-                  <span className={`font-mono text-[10px] ${live ? 'text-green-500' : 'text-gray-700'}`}>
-                    {live ? 'live' : 'soon'}
-                  </span>
-                </div>
-                <div className="font-mono text-[11px] text-gray-600">{sub}</div>
+          </Reveal>
+        </div>
+      </section>
+
+      {/* ── § 4 — Works with your stack (condensed) ── */}
+      <section id="stack" className="px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <SectionHead
+            no="4"
+            kicker="Works with your stack"
+            title={<>Keep your stack.<br />Add detection.</>}
+            aside="Traces in from what you already run. Alerts out to where you already look. Cernova sits on top — it doesn't replace anything."
+          />
+          <div className="grid grid-cols-1 md:grid-cols-3 border-2 border-[#e9e4f0] bg-[#281f38]">
+            {([
+              ['Traces in', ['Anthropic SDK', 'OpenAI SDK', 'LangChain', 'OpenTelemetry', 'Vercel AI SDK', 'Langfuse & LangSmith import', 'Coding-agent install (new)']],
+              ['Alerts out', ['Slack', 'Sentry', 'Signed webhooks']],
+              ['Data out', ['Read API', 'Pull traces & anomalies']],
+            ] as [string, string[]][]).map(([group, items], i) => (
+              <div key={group} className={['p-8 border-[#e9e4f0]', i < 2 ? 'border-b md:border-b-0 md:border-r' : ''].join(' ')}>
+                <Reveal delay={i * 100}>
+                  <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#9a91ad] mb-5">{group}</div>
+                  <ul className="space-y-2.5">
+                    {items.map(name => (
+                      <li key={name} className="f-news text-[17px] text-[#e9e4f0] leading-6">{name}</li>
+                    ))}
+                  </ul>
+                </Reveal>
               </div>
             ))}
           </div>
+          <Reveal>
+            <div className="mt-8 flex justify-center">
+              <Link href="/docs" className="f-type text-[12px] font-bold uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#9a91ad] decoration-2 underline-offset-4 hover:decoration-[#e9e4f0] transition-colors">See every integration &amp; two-line setup in the docs →</Link>
+            </div>
+          </Reveal>
         </div>
       </section>
 
-      {/* ── Setup ── */}
-      <section className="py-20 px-6 border-b border-white/8">
-        <div className="max-w-6xl mx-auto">
-          <p className="font-mono text-[10px] text-gray-600 uppercase tracking-widest mb-3">Setup</p>
-          <h2 className="font-sans font-black text-4xl sm:text-5xl text-white mb-14">
-            Three steps.<br />Under five minutes.
-          </h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              { n: '01', title: 'Install', code: 'npm install @cernova/sdk' },
-              { n: '02', title: 'Wrap your client', code: `const tracer = new Tracer({ apiKey })
-const anthropic = tracer.wrapAnthropic(
-  new Anthropic()
-)` },
-              { n: '03', title: 'Use normally', code: `await anthropic.messages.create({
-  model: 'claude-haiku-4-5-20251001',
-  messages: [...],
-  _trace: { stepName: 'classify' },
-})` },
-            ].map((s) => (
-              <div key={s.n}>
-                <div className="font-sans font-black text-[80px] text-white/6 leading-none mb-6 select-none">{s.n}</div>
-                <div className="font-sans font-bold text-white text-sm mb-4">{s.title}</div>
-                <div className="border border-white/10 bg-[#050505] overflow-hidden">
-                  <div className="flex items-center justify-between px-4 py-2 border-b border-white/5">
-                    <span className="font-mono text-[10px] text-gray-700">typescript</span>
-                    <CopyBtn text={s.code} />
-                  </div>
-                  <pre className="px-4 py-4 font-mono text-xs text-violet-300 whitespace-pre leading-6 overflow-x-auto">{s.code}</pre>
-                </div>
-              </div>
-            ))}
+      {/* ── Closing — CTA only (hero already owns the line) ── */}
+      <section className="px-6 py-24 border-t-2 border-[#e9e4f0]">
+        <Reveal className="max-w-3xl mx-auto text-center">
+          <div className="mb-8"><CrystalPlate /></div>
+          <p className="f-news italic text-xl sm:text-2xl text-[#c9c2d6] leading-snug mb-4">
+            The maintenance layer for production AI.
+          </p>
+          <p className="f-type text-[12px] uppercase tracking-[0.16em] text-[#9a91ad] mb-10">
+            No credit card · Free to start · Warm baselines in minutes
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-8">
+            <InkButton href="/login">Start free →</InkButton>
+            <Link href="/docs" className="f-type text-[12px] uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#9a91ad] decoration-2 underline-offset-4 hover:decoration-[#e9e4f0] transition-colors">Read the docs</Link>
           </div>
-        </div>
+        </Reveal>
       </section>
 
-      {/* ── CTA ── */}
-      <section className="py-24 px-6">
-        <div className="max-w-6xl mx-auto">
-          <h2 className="font-sans font-black text-5xl sm:text-7xl text-white leading-[0.95] mb-10">
-            Dashboards show you.<br />
-            <span className="text-violet-500">Cernova tells you.</span>
-          </h2>
-          <div className="flex flex-wrap items-center gap-6">
-            <Link href="/login" className="font-mono font-bold text-sm px-8 py-4 bg-violet-600 hover:bg-violet-500 text-white transition-colors">
-              get started free →
-            </Link>
-            <Link href="/docs" className="font-mono text-sm text-gray-600 hover:text-white transition-colors underline underline-offset-4">
-              read the docs
-            </Link>
-            <span className="font-mono text-[11px] text-gray-700">no credit card · free to start</span>
-          </div>
-        </div>
-      </section>
-
-      {/* ── Footer ── */}
-      <footer className="border-t border-white/8 py-8 px-6">
+      {/* ── Colophon ── */}
+      <footer className="border-t-2 border-[#e9e4f0] py-8 px-6 bg-[#332946]">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-          <Link href="/" className="flex items-center gap-2 font-sans font-black text-sm text-white">
-            <img src="/logo.svg" alt="" className="w-5 h-5" />
+          <Link href="/" className="flex items-center gap-2.5 f-news font-bold text-lg text-[#e9e4f0]">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="" width={18} height={18} className="shrink-0" />
             Cernova
           </Link>
-          <div className="flex items-center gap-8">
-            <Link href="/docs" className="font-mono text-[11px] text-gray-700 hover:text-white transition-colors">docs</Link>
-            <Link href="/login" className="font-mono text-[11px] text-gray-700 hover:text-white transition-colors">sign in</Link>
+          <p className="f-type text-[10px] uppercase tracking-[0.18em] text-[#9a91ad]">Set in Newsreader & Courier Prime · printed continuously</p>
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+            <Link href="/" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Home</Link>
+            <Link href="/about" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">About</Link>
+            <Link href="/mission" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Mission</Link>
+            <Link href="/docs" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Docs</Link>
+            <Link href="/login" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">Sign in</Link>
           </div>
         </div>
       </footer>
+
+      </div>
     </div>
   )
 }

@@ -9,5 +9,14 @@ touching the engine.
 
 from adapters.cernova import to_canonical
 from adapters.otel import otlp_json_to_canonical
+from adapters.langfuse import observation_to_canonical, observations_to_canonical
+from adapters.langsmith import run_to_canonical, runs_to_canonical
 
-__all__ = ["to_canonical", "otlp_json_to_canonical"]
+__all__ = [
+    "to_canonical",
+    "otlp_json_to_canonical",
+    "observation_to_canonical",
+    "observations_to_canonical",
+    "run_to_canonical",
+    "runs_to_canonical",
+]

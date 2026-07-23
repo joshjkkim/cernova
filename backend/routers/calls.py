@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from typing import List
 from pydantic import BaseModel
 from db import get_client
+from auth import require_owner, require_owner_of_run
 
 router = APIRouter(prefix="/calls", tags=["calls"])
 
@@ -27,18 +28,19 @@ class CallResponse(BaseModel):
 
 
 @router.get("/run/{run_id}", response_model=List[CallResponse])
-def get_calls_by_run_id(run_id: str) -> List[CallResponse]:
-    """Get all calls from a specific run_id."""
+def get_calls_by_run_id(request: Request, run_id: str) -> List[CallResponse]:
+    """Get all calls from a specific run_id (owner only)."""
+    require_owner_of_run(request, run_id)
     try:
         client = get_client()
         res = client.table("CALLS").select("*").eq("run_id", run_id).execute()
-        
+
         if not res.data:
             raise HTTPException(
                 status_code=404,
                 detail=f"No calls found for run_id: {run_id}"
             )
-        
+
         return [CallResponse(**call) for call in res.data]
     except HTTPException:
         raise
@@ -47,19 +49,14 @@ def get_calls_by_run_id(run_id: str) -> List[CallResponse]:
 
 
 @router.get("/project/{project_id}", response_model=List[CallResponse])
-def get_calls_by_project_id(project_id: str) -> List[CallResponse]:
-    """Get all calls from a specific project_id."""
+def get_calls_by_project_id(request: Request, project_id: str) -> List[CallResponse]:
+    """Get all calls from a specific project_id (owner only)."""
+    require_owner(request, project_id)
     try:
         client = get_client()
         res = client.table("CALLS").select("*").eq("project_id", project_id).order("created_at", desc=True).execute()
-        
-        if not res.data:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No calls found for project_id: {project_id}"
-            )
-        
-        return [CallResponse(**call) for call in res.data]
+
+        return [CallResponse(**call) for call in (res.data or [])]
     except HTTPException:
         raise
     except Exception as exc:

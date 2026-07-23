@@ -1,7 +1,7 @@
 """Golden tests for the cernova adapter and CanonicalTrace helpers.
 
 These pin the wire-format → canonical mapping and the kernel/instruction
-extraction that step fingerprinting and L2/L3 format checks depend on.
+extraction that step fingerprinting and output_format checks depend on.
 If one of these breaks, step identities shift and baselines silently reset —
 change them only with intent.
 """
@@ -152,7 +152,7 @@ def test_unparseable_prompt_falls_back_to_raw():
     assert trace.system is None
     assert trace.messages == []
     assert trace.kernel() == raw[:200]
-    assert trace.instruction_text() == raw  # L2/L3 see the raw string untruncated
+    assert trace.instruction_text() == raw  # output_format sees the raw string untruncated
 
 
 def test_json_but_not_dict_treated_as_raw():
@@ -164,7 +164,7 @@ def test_json_but_not_dict_treated_as_raw():
 
 def test_dict_without_messages_key():
     # Kernel still uses system; instruction falls back to raw (parity with the
-    # pre-adapter behavior, where L2/L3 extraction required a "messages" key).
+    # pre-adapter behavior, where output_format extraction required a "messages" key).
     raw = json.dumps({"system": "Summarize the document."})
     trace = to_canonical(make_payload(raw))
     assert trace.prompt_parsed is False

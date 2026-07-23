@@ -1,0 +1,12 @@
+[tool.pytest.ini_options]
+testpaths = ["tests", "anomaly/tests"]
+
+[tool.coverage.run]
+omit = [
+    "tests/*",
+    "anomaly/tests/*",
+    "research/*",       # throwaway spikes, not product code
+    "ml/*",             # offline training scripts
+    "conftest.py",
+    ".venv/*",
+]

@@ -13,11 +13,14 @@ Both OTLP/JSON and OTLP/protobuf encodings are accepted.
 """
 
 import json
+import logging
 
 from fastapi import APIRouter, Request, HTTPException, Response
 
 from adapters import otlp_json_to_canonical
 from routers.ingest import _resolve_project, process_canonical
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(tags=["otel"])
 
@@ -71,10 +74,10 @@ async def otlp_traces(request: Request) -> Response:
         try:
             process_canonical(trace, project)
             accepted += 1
-        except Exception as exc:
-            print(f"[otel] failed to process span {trace.span_id}: {exc}")
+        except Exception:
+            log.error(f"[otel] failed to process span {trace.span_id}", exc_info=True)
 
-    print(f"[otel] project={project['id']} genai_spans={len(traces)} accepted={accepted}")
+    log.info(f"[otel] project={project['id']} genai_spans={len(traces)} accepted={accepted}")
 
     # OTLP success response is an empty ExportTraceServiceResponse.
     return Response(content="{}", media_type="application/json")

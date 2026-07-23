@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from .schemas import BehaviorBaseline, StepBaseline
+from .schemas import StepBaseline
 
 
 class EvalConfig(BaseModel):
@@ -21,15 +21,28 @@ class EvalConfig(BaseModel):
     # its raw threshold checks (4001/4002/4003) to avoid double-counting.
     baseline: StepBaseline | None = None
 
-    # Per-step behavioral centroid (L3). When present, L3 scores drift via cosine
-    # distance against stored behavior vectors for this step profile.
-    behavior_baseline: BehaviorBaseline | None = None
-    behavior_drift_threshold: float = 0.35
+    # When an *enforced* learned contract governs this step's output shape, the
+    # regex output_format layer defers its JSON checks (2001/2002) to it — the
+    # contract's format_not_json (2010) covers the same failure, so we don't
+    # double-count one bad shape. Same "defer to the more precise signal" rule
+    # the baseline gives numeric_thresholds above.
+    contract_governs_format: bool = False
 
     # Tukey fence multiplier k: fence = Q3 + k*IQR (upper) / Q1 - k*IQR (lower).
     # k=2.5 gives ~0.05% false positive rate on normal data; real LLM distributions
     # are more skewed, so the log-space transform in MetricStat compensates.
+    # Only used on the LEGACY path — when a MetricStat carries a conformal
+    # calibration set, the decision is p <= conformal_alpha instead and k is
+    # irrelevant (calibration already absorbs the distribution's width).
     iqr_fence_k: float = 2.5
+
+    # Conformal false-alarm budget: a scalar fires when its conformal p-value
+    # <= alpha — guaranteeing (distribution-free, finite-sample) that at most
+    # this fraction of CLEAN calls fires per scalar. With few calibration
+    # samples the smallest achievable p is 1/(n+1) (2/(n+1) two-sided); the
+    # layer fires at max(alpha, that floor), so small-n steps still detect
+    # "beyond everything in history" while the guarantee tightens as n grows.
+    conformal_alpha: float = 0.01
 
     # Static numeric limits — consumed by L4 later. Defined now so config shape
     # is stable across layers.
