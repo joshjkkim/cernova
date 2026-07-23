@@ -122,73 +122,91 @@ function DocsLink({ children = 'How it works →' }: { children?: ReactNode }) {
   )
 }
 
-// ── FIG. 1 — a live, faithful run ─────────────────────────────────────────────
-// Mirrors the real dashboard run-waterfall: steps stream in with latency bars,
-// one spikes in red ink, the engine scores it, threshold trips. Then loops.
+// ── FIG. 1 — a live run with a SILENT failure ─────────────────────────────────
+// Every step returns 200 OK at normal latency — nothing a log or APM flags. But
+// generate-reply answers a billing question with store hours: fluent, valid, and
+// wrong. Cernova catches the semantic break, then says what broke, why, and the
+// fix. Loops.
 
-interface Step { name: string; ms: number; tokens: string; bar: string; note?: string }
+interface LiveStep { name: string; ms: number }
 
-const CLEAN: Step[] = [
-  { name: 'classify-intent', ms: 84,   tokens: '12tk',  bar: INK },
-  { name: 'retrieve-context', ms: 340, tokens: '89tk',  bar: INK },
-  { name: 'rank-results',    ms: 210,  tokens: '47tk',  bar: INK },
-  { name: 'generate-reply',  ms: 1240, tokens: '312tk', bar: INK },
+const RUN_STEPS: LiveStep[] = [
+  { name: 'classify-intent',  ms: 84 },
+  { name: 'retrieve-context', ms: 210 },
+  { name: 'generate-reply',   ms: 910 },
 ]
 
-const SPIKE: Step = { name: 'retrieve-context', ms: 8400, tokens: '3tk', bar: RED, note: '8× slower than its usual — flagged' }
-
 function LiveRun() {
+  // 0 ask · 1–3 steps land (all 200) · 4 flagged · 5 diagnosed · loop
   const [phase, setPhase] = useState(0)
   useEffect(() => {
-    const seq = [700, 700, 700, 700, 900, 800, 800, 2600]
+    const seq = [1000, 800, 800, 1600, 1500, 3400]
     const t = setTimeout(() => setPhase(p => (p + 1) % seq.length), seq[phase])
     return () => clearTimeout(t)
   }, [phase])
 
-  const spiked = phase >= 5
-  const rows = CLEAN.map((s, i) => (i === 1 && spiked ? SPIKE : s))
-  const shown = phase >= 4 ? 4 : phase + 1
-  const maxMs = 8400
-  const score = phase < 5 ? 0 : phase === 5 ? 30 : phase === 6 ? 50 : 110
+  const shownSteps = Math.min(phase, 3)
+  const flagged = phase >= 4
+  const diagnosed = phase >= 5
 
   return (
     <figure>
       <div className="border-2 border-[#e9e4f0] bg-[#281f38] shadow-[7px_7px_0_#e9e4f0]">
         <div className="flex items-center justify-between px-5 py-2.5 border-b-2 border-[#e9e4f0]">
           <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e9e4f0]">Fig. 1 — run:a3f9 · support-agent</span>
-          <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em] text-[#e0533d]">● live</span>
+          <span className="f-type text-[11px] font-bold uppercase tracking-[0.18em]" style={{ color: RED }}>● live</span>
         </div>
 
-        <div className="p-6 space-y-4 min-h-[280px]">
-          {rows.slice(0, shown).map((s, i) => (
-            <div key={i} className="f-type text-[12px]">
-              <div className="flex items-center justify-between mb-1.5">
-                <span style={{ color: s.bar === RED ? RED : INK }} className={s.bar === RED ? 'font-bold' : ''}>{s.name}</span>
-                <span className="text-[#9a91ad]">{s.ms}ms · {s.tokens}</span>
-              </div>
-              <div className="h-2.5 border border-[#e9e4f0]/30 bg-[#332946]">
-                <div className="h-full transition-all duration-500" style={{ width: `${Math.max(4, (s.ms / maxMs) * 100)}%`, background: s.bar }} />
-              </div>
-              {s.note && <div className="text-[11px] mt-1.5 font-bold" style={{ color: RED }}>↳ {s.note}</div>}
+        <div className="p-6 space-y-3 min-h-[340px]">
+          <div className="f-type text-[12px] text-[#9a91ad] border-l-2 border-[#3a2f4e] pl-3 leading-6">
+            user — &ldquo;my invoice is wrong, I was double-charged&rdquo;
+          </div>
+
+          <div className="space-y-1.5 pt-1">
+            {RUN_STEPS.slice(0, shownSteps).map((s, i) => {
+              const red = s.name === 'generate-reply' && flagged
+              return (
+                <div key={i} className="flex items-center justify-between f-type text-[12px]">
+                  <span style={{ color: red ? RED : INK }} className={red ? 'font-bold' : ''}>
+                    {red ? '✕' : '✓'} {s.name}
+                  </span>
+                  <span className="text-[#9a91ad]">200 · {s.ms}ms</span>
+                </div>
+              )
+            })}
+          </div>
+
+          {phase >= 3 && (
+            <div className="border border-[#3a2f4e] bg-[#332946] p-3 f-type text-[12px] text-[#c9c2d6] leading-6">
+              &ldquo;Our store is open 9 am–10 pm on weekdays! Hope to see you soon.&rdquo;
+              {flagged && (
+                <div className="mt-2 pt-2 border-t border-[#3a2f4e] text-[11px] font-bold" style={{ color: RED }}>
+                  ↳ nothing generate-reply ever says to a billing question
+                </div>
+              )}
             </div>
-          ))}
+          )}
+
+          {diagnosed && (
+            <div className="border-l-2 pl-3 space-y-1 f-type text-[11px]" style={{ borderColor: RED }}>
+              <div><span className="text-[#9a91ad]">what broke — </span><span className="text-[#e9e4f0] font-bold">generate-reply</span></div>
+              <div><span className="text-[#9a91ad]">why — </span><span className="text-[#c9c2d6]">retrieval returned store info, not billing — the reply answered the wrong context</span></div>
+              <div><span className="text-[#9a91ad]">fix — </span><span style={{ color: VIOLET }}>scope the retriever to billing docs for invoice intents</span></div>
+            </div>
+          )}
         </div>
 
         <div className="border-t-2 border-[#e9e4f0] px-6 py-4">
-          <div className="flex items-center justify-between f-type text-[11px] mb-2">
+          <div className="flex items-center justify-between f-type text-[11px]">
             <span className="uppercase tracking-[0.18em] text-[#9a91ad]">health</span>
-            <span className="font-bold" style={{ color: score > 0 ? RED : INK }}>
-              {score >= 100 ? 'broken → alerted to #prod' : score > 0 ? 'drifting…' : 'all steps normal ✓'}
+            <span className="font-bold" style={{ color: flagged ? RED : INK }}>
+              {diagnosed ? 'diagnosed → pushed to #prod' : flagged ? 'silent failure caught' : phase >= 3 ? 'all steps 200 OK ✓' : 'watching…'}
             </span>
-          </div>
-          <div className="h-2.5 border border-[#e9e4f0]/30 bg-[#332946] relative">
-            <div className="h-full transition-all duration-700" style={{ width: `${Math.min(100, score)}%`, background: score >= 100 ? RED : '#d9a441' }} />
-            <div className="absolute -top-1 h-[18px] w-[2px] bg-[#e9e4f0]" style={{ left: '90.9%' }} />
           </div>
         </div>
       </div>
       <figcaption className="f-type text-[11px] text-[#9a91ad] mt-3 leading-5">
-        Fig. 1 — A production run, watched live. {spiked ? 'One step just broke its normal pattern — caught, scored, and pushed to your alerts.' : 'Every step measured against what it normally does.'}
+        Fig. 1 — Every step returned <b>200 OK</b> at normal speed. The answer was fluent — and wrong. {flagged ? 'Cernova caught the break your logs can’t see, then said what to fix.' : 'Nothing a log or dashboard would flag.'}
       </figcaption>
     </figure>
   )
@@ -237,13 +255,13 @@ function ProductBoard() {
           </div>
         ) : (
           <div className="p-5 space-y-3.5">
-            {CLEAN.map((s, i) => (
+            {RUN_STEPS.map((s, i) => (
               <div key={i} className="f-type text-[12px]">
                 <div className="flex justify-between mb-1.5"><span className="text-[#e9e4f0]">{s.name}</span><span className="text-[#9a91ad]">{s.ms}ms</span></div>
                 <div className="h-2.5 border border-[#e9e4f0]/30 bg-[#332946]"><div className="h-full bg-[#e9e4f0]" style={{ width: `${Math.max(6, (s.ms / 1400) * 100)}%`, marginLeft: `${i * 12}%` }} /></div>
               </div>
             ))}
-            <div className="f-type text-[11px] text-[#9a91ad] pt-1 italic">run:a3f9 · 4 steps · 1.87s · $0.00072 · clean ✓</div>
+            <div className="f-type text-[11px] text-[#9a91ad] pt-1 italic">run:a3f9 · 3 steps · 1.20s · $0.00068 · clean ✓</div>
           </div>
         )}
       </div>
@@ -282,8 +300,8 @@ const OUTCOMES: { no: string; head: string; body: string }[] = [
   },
   {
     no: 'III',
-    head: 'Tells you before your users do.',
-    body: 'The instant a step breaks its own pattern, Cernova flags it — to Slack, Sentry, or your own webhook — with the run, what changed, and one-tap root cause.',
+    head: 'Tells you what broke — not just that something did.',
+    body: 'No dashboard to go stare at. The moment a step breaks its pattern, you get a flag — in Slack, Sentry, or your webhook — with the run, what changed, and the root cause. You fix it in minutes instead of reading transcripts for days.',
   },
 ]
 
@@ -412,6 +430,7 @@ export default function LandingPage() {
           <div className="flex items-center gap-7">
             <a href="#problem" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">The problem</a>
             <a href="#solution" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">What it does</a>
+            <a href="#install" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Get in</a>
             <a href="#stack" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Integrations</a>
             <Link href="/docs" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors hidden sm:block">Docs</Link>
             <Link href="/login" className="f-type text-[11px] uppercase tracking-[0.16em] text-[#9a91ad] hover:text-[#b794f4] transition-colors">Sign in</Link>
@@ -424,7 +443,7 @@ export default function LandingPage() {
       <section className="px-6 pt-10 pb-20">
         <div className="max-w-6xl mx-auto">
           <div className="border-b border-[#e9e4f0] pb-2 mb-12 flex items-center justify-between f-type text-[10px] uppercase tracking-[0.22em] text-[#9a91ad]">
-            <span>Vol. I — The detection layer for LLM pipelines</span>
+            <span>Vol. I — The maintenance layer for AI agents</span>
             <span className="hidden sm:block">Open beta · free to start</span>
           </div>
 
@@ -434,7 +453,7 @@ export default function LandingPage() {
                 Your agent is failing. <em className="not-italic" style={{ color: VIOLET }}><span className="italic">Silently.</span></em>
               </h1>
               <p className="f-news text-xl text-[#c9c2d6] leading-8 max-w-lg mb-10">
-                LLMs don&apos;t throw exceptions. They hallucinate, break their format, spike cost, and drift — while every dashboard stays green. Cernova learns what each step of your app normally does, and tells you the moment one breaks.
+                You shipped an agent in a weekend. Keeping it working is the part no one warns you about. LLMs don&apos;t crash — they hallucinate, break format, drift, and answer wrong while every dashboard stays green. Cernova learns what each step normally does and tells you the moment one breaks — what broke, why, and the fix.
               </p>
               <div className="flex items-center gap-7 mb-12">
                 <InkButton href="/login">Start free →</InkButton>
@@ -526,6 +545,49 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── Interlude — getting in ── */}
+      <section id="install" className="px-6 py-24">
+        <div className="max-w-6xl mx-auto">
+          <Reveal>
+            <div className="border-t-2 border-[#e9e4f0] pt-5 mb-12">
+              <Kicker>Getting in</Kicker>
+              <h2 className="f-news font-bold text-5xl sm:text-6xl text-[#e9e4f0] mt-5 mb-4 leading-[1.02] tracking-tight">One line. Or none.</h2>
+              <p className="f-news italic text-[17px] text-[#9a91ad] max-w-xl leading-7">No ML team, no enterprise contract, no afternoon lost to setup. Two ways in — pick the one that matches how you build.</p>
+            </div>
+          </Reveal>
+          <div className="grid grid-cols-1 md:grid-cols-2 border-2 border-[#e9e4f0] bg-[#281f38]">
+            <Reveal className="p-8 border-b md:border-b-0 md:border-r border-[#e9e4f0]">
+              <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#b794f4] mb-4">Wrap your client</div>
+              <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-5">Two lines around your model client. Every call your agent makes is watched — no changes to your logic.</p>
+              <pre className="f-type text-[11px] text-[#e9e4f0] bg-[#201a2b] border border-[#3a2f4e] p-4 overflow-x-auto leading-6">{`const tracer    = new Tracer({ apiKey })
+const anthropic = tracer.wrapAnthropic(client)`}</pre>
+            </Reveal>
+            <Reveal delay={100} className="p-8">
+              <div className="f-type text-[11px] font-bold uppercase tracking-[0.22em] text-[#b794f4] mb-4">Or hand it to your coding agent</div>
+              <p className="f-news text-[16px] text-[#c9c2d6] leading-7 mb-5">Building in Cursor or Claude Code? Tell it to install Cernova and it wires every model call in your repo for you — even across a multi-agent setup.</p>
+              <pre className="f-type text-[11px] text-[#e9e4f0] bg-[#201a2b] border border-[#3a2f4e] p-4 overflow-x-auto leading-6">{`> install cernova and instrument
+  my agents`}</pre>
+            </Reveal>
+          </div>
+
+          <Reveal>
+            <div className="mt-8 border-2 border-[#e9e4f0] bg-[#332946] grid grid-cols-2 md:grid-cols-4 divide-x divide-[#e9e4f0]/30">
+              {([
+                ['≤1%', 'false alarms, proven'],
+                ['~1ms', 'added per call'],
+                ['20', 'calls to learn a step'],
+                ['minutes', 'to first detection'],
+              ] as [string, string][]).map(([n, l]) => (
+                <div key={l} className="px-5 py-6 text-center">
+                  <div className="f-news font-bold text-4xl text-[#e9e4f0]">{n}</div>
+                  <div className="f-type text-[10px] uppercase tracking-[0.16em] text-[#9a91ad] mt-2 leading-4">{l}</div>
+                </div>
+              ))}
+            </div>
+          </Reveal>
+        </div>
+      </section>
+
       {/* ── § 3 — See it (the dashboard) ── */}
       <section id="product" className="px-6 py-24">
         <div className="max-w-6xl mx-auto">
@@ -560,7 +622,7 @@ export default function LandingPage() {
           />
           <div className="grid grid-cols-1 md:grid-cols-3 border-2 border-[#e9e4f0] bg-[#281f38]">
             {([
-              ['Traces in', ['Anthropic SDK', 'OpenAI SDK', 'LangChain', 'OpenTelemetry', 'Vercel AI SDK', 'Langfuse & LangSmith import']],
+              ['Traces in', ['Anthropic SDK', 'OpenAI SDK', 'LangChain', 'OpenTelemetry', 'Vercel AI SDK', 'Langfuse & LangSmith import', 'Coding-agent install (new)']],
               ['Alerts out', ['Slack', 'Sentry', 'Signed webhooks']],
               ['Data out', ['Read API', 'Pull traces & anomalies']],
             ] as [string, string[]][]).map(([group, items], i) => (
@@ -589,9 +651,9 @@ export default function LandingPage() {
         <Reveal className="max-w-6xl mx-auto text-center">
           <div className="mb-10"><CrystalPlate /></div>
           <h2 className="f-news font-bold text-5xl sm:text-7xl text-[#e9e4f0] leading-[1.0] tracking-tight mb-8">
-            Dashboards show you.<br /><span className="italic" style={{ color: VIOLET }}>Cernova tells you.</span>
+            Anyone can build an AI agent.<br /><span className="italic" style={{ color: VIOLET }}>Keeping it working is the hard part.</span>
           </h2>
-          <p className="f-news italic text-lg text-[#9a91ad] mb-12">No credit card. Free to start. Warm baselines in minutes.</p>
+          <p className="f-news italic text-lg text-[#9a91ad] mb-12">Cernova is the maintenance layer for production AI. No credit card. Free to start. Warm baselines in minutes.</p>
           <div className="flex flex-wrap items-center justify-center gap-8">
             <InkButton href="/login">Get started free →</InkButton>
             <Link href="/docs" className="f-type text-[12px] uppercase tracking-[0.14em] text-[#e9e4f0] underline decoration-[#b794f4] decoration-2 underline-offset-4 hover:text-[#b794f4] transition-colors">Read the docs</Link>

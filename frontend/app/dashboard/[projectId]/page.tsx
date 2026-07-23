@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 import { authFetch } from '@/lib/api';
 import { Badge, StatCard, SearchInput, EmptyState, SegmentedControl, Toggle } from '@/components/ui';
+import type { Call, KeySpec, ContractRow, MetricTrend, StepHealthRow, AnomalyRow, Incident, Tab } from './types';
+import {
+  FirstRun, TourOverlay, TOUR_STEPS,
+  DEMO_CALLS, DEMO_ANOMALIES, DEMO_STEP_HEALTH, DEMO_CONTRACTS, DEMO_INCIDENTS,
+} from './onboarding';
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
 
@@ -35,25 +40,6 @@ interface Project {
   systemic_min_runs?: number | null;
 }
 
-interface Call {
-  id: string | number;
-  run_id?: string;
-  step_index?: number;
-  step_name?: string;
-  model?: string;
-  input_tokens?: number;
-  output_tokens?: number;
-  total_tokens?: number;
-  latency_ms?: number;
-  cost?: number;
-  status_success?: boolean;
-  prompt?: string;
-  output_code?: string;
-  error?: string;
-  created_at?: string;
-  project_id?: string;
-}
-
 interface Run {
   runId: string;
   steps: Call[];
@@ -64,55 +50,7 @@ interface Run {
   createdAt: string;
 }
 
-type Tab = 'overview' | 'logs' | 'runs' | 'anomalies' | 'steps' | 'contracts' | 'usage' | 'settings';
-
-interface KeySpec {
-  name: string;
-  presence: number;            // fraction of JSON outputs containing this key
-  types: string[];             // JSON types seen for this key
-  enum_values?: string[] | null;
-  num_min?: number | null;
-  num_max?: number | null;
-}
-
-interface ContractRow {
-  step_profile_id: string;
-  step_name: string | null;
-  status: 'observing' | 'proposed' | 'enforced' | 'rejected';
-  format: string | null;
-  json_rate?: number | null;
-  required_keys: string[];
-  keys?: Record<string, KeySpec>;
-  sample_count: number | null;
-}
-
-interface MetricTrend {
-  metric: string;
-  baseline_mean: number;
-  recent_mean: number;
-  sigma: number;
-  direction: 'up' | 'down';
-}
-
-interface StepHealthRow {
-  step_profile_id: string;
-  step_name: string;
-  status: 'warming' | 'healthy' | 'degrading' | 'critical';
-  sample_count: number;
-  trends: MetricTrend[];
-}
-
 const L5_MIN_SAMPLES = 20;
-
-interface AnomalyRow {
-  id: number;
-  step_name: string;
-  run_id: string;
-  project_id: string | null;
-  error_code: number;
-  penalty_score: number;
-  created_at: string;
-}
 
 interface ConditionInfo {
   name: string;
@@ -129,18 +67,6 @@ interface AnomalyRun {
   is_critical: boolean;
   steps: { step_name: string; codes: { code: number; score: number }[] }[];
   latest_at: string;
-}
-
-// A systemic incident: the same condition hit many runs at once (backend
-// services/systemic_service). The macro-scale sibling of a per-run anomaly.
-interface Incident {
-  id: number;
-  step_name: string | null;
-  error_code: number;
-  run_count: number;
-  window_min: number;
-  status: string;
-  opened_at: string;
 }
 
 const ANOMALY_THRESHOLD = 100;
@@ -248,10 +174,21 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [stepHealth, setStepHealth]       = useState<StepHealthRow[]>([]);
   const [contracts, setContracts]         = useState<ContractRow[]>([]);
   const [incidents, setIncidents]         = useState<Incident[]>([]);
+  const [tourStep, setTourStep]           = useState<number | null>(null);
 
-  const runs = useMemo(() => groupIntoRuns(calls), [calls]);
+  const hasData  = calls.length > 0;
+  // Demo mode: while the tour runs on an empty project, render a sample dataset so
+  // each tab shows what real traffic looks like. Display-only, never persisted.
+  const demoMode = tourStep !== null && !hasData;
+  const viewCalls     = demoMode ? DEMO_CALLS : calls;
+  const viewAnomalies = demoMode ? DEMO_ANOMALIES : anomalies;
+  const viewHealth    = demoMode ? DEMO_STEP_HEALTH : stepHealth;
+  const viewContracts = demoMode ? DEMO_CONTRACTS : contracts;
+  const viewIncidents = demoMode ? DEMO_INCIDENTS : incidents;
+
+  const runs = useMemo(() => groupIntoRuns(viewCalls), [viewCalls]);
   const selectedRun = useMemo(() => runs.find((r) => r.runId === selectedRunId) ?? null, [runs, selectedRunId]);
-  const anomalyRuns = useMemo(() => groupAnomalies(anomalies), [anomalies]);
+  const anomalyRuns = useMemo(() => groupAnomalies(viewAnomalies), [viewAnomalies]);
   const criticalCount = anomalyRuns.filter((r) => r.is_critical).length;
   const anomalyMap = useMemo(() => new Map(anomalyRuns.map((r) => [r.run_id, r])), [anomalyRuns]);
 
@@ -293,7 +230,10 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
         authFetch(`${BACKEND}/projects/${proj.id}/step-health`),
         authFetch(`${BACKEND}/incidents/project/${proj.id}`),
       ]);
-      if (callsRes.ok) setCalls((await callsRes.json() as Call[]).slice().reverse());
+      const loadedCalls = callsRes.ok ? (await callsRes.json() as Call[]).slice().reverse() : [];
+      setCalls(loadedCalls);
+      // First-time tour: only on a genuinely empty (just-created) project, once ever.
+      if (loadedCalls.length === 0 && !localStorage.getItem('cernova_tour_seen')) setTourStep(0);
       if (anomaliesRes.ok) setAnomalies(await anomaliesRes.json() as AnomalyRow[]);
       if (registryRes.ok) setConditionRegistry(await registryRes.json() as ConditionRegistry);
       if (healthRes.ok) setStepHealth(await healthRes.json() as StepHealthRow[]);
@@ -335,6 +275,11 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     return () => { supabase.removeChannel(channel); };
   }, [projectId]);
 
+  // Tour drives the tab so each step's real surface is behind the card.
+  useEffect(() => {
+    if (tourStep !== null) { setTab(TOUR_STEPS[tourStep].tab); setSelectedRunId(null); }
+  }, [tourStep]);
+
   if (authError) {
     return (
       <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] flex items-center justify-center">
@@ -354,16 +299,15 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     );
   }
 
-  const degradingCount = stepHealth.filter(s => s.status !== 'healthy').length;
-  const proposedCount = contracts.filter(c => c.status === 'proposed').length;
+  const degradingCount = viewHealth.filter(s => s.status !== 'healthy').length;
+  const proposedCount = viewContracts.filter(c => c.status === 'proposed').length;
 
   const TABS: { id: Tab; label: string }[] = [
     { id: 'overview',  label: 'overview' },
     { id: 'logs',      label: 'logs' },
     { id: 'runs',      label: `runs${runs.length ? ` (${runs.length})` : ''}` },
-    { id: 'anomalies', label: `detections${incidents.length ? ` (${incidents.length} incident${incidents.length > 1 ? 's' : ''})` : criticalCount ? ` (${criticalCount} critical)` : anomalyRuns.length ? ` (${anomalyRuns.length})` : ''}` },
-    { id: 'steps',     label: `steps${degradingCount ? ` (${degradingCount} drifting)` : ''}` },
-    { id: 'contracts', label: `contracts${proposedCount ? ` (${proposedCount} new)` : ''}` },
+    { id: 'anomalies', label: `detections${viewIncidents.length ? ` (${viewIncidents.length} incident${viewIncidents.length > 1 ? 's' : ''})` : criticalCount ? ` (${criticalCount} critical)` : anomalyRuns.length ? ` (${anomalyRuns.length})` : ''}` },
+    { id: 'steps',     label: `steps${(degradingCount + proposedCount) ? ` (${degradingCount + proposedCount})` : ''}` },
     { id: 'usage',     label: 'usage' },
     { id: 'settings',  label: 'settings' },
   ];
@@ -418,15 +362,17 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
 
       <div className="max-w-6xl mx-auto px-4 sm:px-8 py-6">
 
-        {tab === 'overview'  && <OverviewTab calls={calls} />}
+        {tab === 'overview'  && (hasData || demoMode
+          ? <OverviewTab calls={viewCalls} openIncidents={viewIncidents.filter(i => i.status === 'open').length} drifting={viewHealth.filter(s => s.status === 'degrading' || s.status === 'critical').length} shapes={proposedCount} critical={criticalCount} onNavigate={setTab} />
+          : <FirstRun apiKey={project.API_KEY} connected={status === 'connected'} onImport={() => setTab('settings')} />)}
 
         {tab === 'logs' && (() => {
           const q = logsQuery.toLowerCase();
-          const filtered = calls.filter(c =>
+          const filtered = viewCalls.filter(c =>
             !q || (c.step_name ?? '').toLowerCase().includes(q) || (c.model ?? '').toLowerCase().includes(q) ||
             (c.run_id ?? '').toLowerCase().includes(q) || (c.error ?? '').toLowerCase().includes(q)
           );
-          return calls.length === 0
+          return viewCalls.length === 0
             ? <EmptyState text="No calls yet — run your first trace to see logs here." />
             : (
               <div>
@@ -494,9 +440,8 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
           </div>
         )}
 
-        {tab === 'anomalies' && <DetectionsTab incidents={incidents} anomalies={anomalies} runs={anomalyRuns} registry={conditionRegistry} />}
-        {tab === 'steps'     && <StepsHealthTab health={stepHealth} />}
-        {tab === 'contracts' && <ContractsTab contracts={contracts} apiKey={project.API_KEY} onUpdate={(id, status) => setContracts(cs => cs.map(c => c.step_profile_id === id ? { ...c, status } : c))} />}
+        {tab === 'anomalies' && <DetectionsTab incidents={viewIncidents} anomalies={viewAnomalies} runs={anomalyRuns} registry={conditionRegistry} apiKey={project.API_KEY} calls={viewCalls} onSelectCall={setSelectedCall} />}
+        {tab === 'steps'     && <StepsTab health={viewHealth} contracts={viewContracts} apiKey={project.API_KEY} onContractUpdate={(id, status) => setContracts(cs => cs.map(c => c.step_profile_id === id ? { ...c, status } : c))} />}
         {tab === 'usage'     && <UsageTab project={project} />}
         {tab === 'settings'  && <SettingsTab project={project} />}
 
@@ -514,15 +459,39 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
           registry={conditionRegistry}
         />
       )}
+
+      {tourStep !== null && (
+        <TourOverlay
+          step={TOUR_STEPS[tourStep]}
+          index={tourStep}
+          total={TOUR_STEPS.length}
+          onBack={() => setTourStep(s => (s === null ? null : Math.max(0, s - 1)))}
+          onNext={() => setTourStep(s => {
+            if (s === null) return null;
+            if (s >= TOUR_STEPS.length - 1) { localStorage.setItem('cernova_tour_seen', '1'); return null; }
+            return s + 1;
+          })}
+          onSkip={() => { localStorage.setItem('cernova_tour_seen', '1'); setTourStep(null); }}
+        />
+      )}
     </main>
   );
 }
 
 // ── Overview tab ──────────────────────────────────────────────────────────────
 
-function OverviewTab({ calls }: { calls: Call[] }) {
+function OverviewTab({ calls, openIncidents, drifting, shapes, critical, onNavigate }: {
+  calls: Call[];
+  openIncidents: number;
+  drifting: number;
+  shapes: number;
+  critical: number;
+  onNavigate: (tab: Tab) => void;
+}) {
   const [range, setRange] = useState<TimeRange>('24h');
   const cfg = RANGES[range];
+  const allClear = openIncidents === 0 && critical === 0 && drifting === 0 && shapes === 0;
+  const chip = 'font-mono text-[11px] px-3 py-1.5 border transition-colors';
 
   const fc = useMemo(() => {
     const cutoff = Date.now() - cfg.hours * 3_600_000;
@@ -555,7 +524,35 @@ function OverviewTab({ calls }: { calls: Call[] }) {
   return (
     <div className="space-y-6">
 
-      <div className="flex justify-end">
+      {/* Detection status — the verdict, before the metrics */}
+      {allClear ? (
+        <div className="bg-[#281f38] border border-[#3a2f4e] border-l-2 border-[#7fb59a] px-5 py-4">
+          <p className="font-sans font-black text-sm text-[#7fb59a]">✓ All clear</p>
+          <p className="font-mono text-[11px] text-[#9a91ad] mt-1">No incidents, no drifting steps, nothing waiting on you — Cernova is watching.</p>
+        </div>
+      ) : (
+        <div className="bg-[#281f38] border border-[#3a2f4e] border-l-2 border-[#e0533d] px-5 py-4">
+          <p className="font-sans font-black text-sm text-[#e9e4f0] mb-3">Needs your attention</p>
+          <div className="flex flex-wrap gap-2">
+            {openIncidents > 0 && (
+              <button onClick={() => onNavigate('anomalies')} className={`${chip} border-[#e0533d]/50 text-[#e0533d] hover:bg-[#e0533d]/12 hover:border-[#e0533d]`}>🚨 {openIncidents} open incident{openIncidents > 1 ? 's' : ''}</button>
+            )}
+            {critical > 0 && (
+              <button onClick={() => onNavigate('anomalies')} className={`${chip} border-[#e0533d]/50 text-[#e0533d] hover:bg-[#e0533d]/12 hover:border-[#e0533d]`}>{critical} critical run{critical > 1 ? 's' : ''}</button>
+            )}
+            {drifting > 0 && (
+              <button onClick={() => onNavigate('steps')} className={`${chip} border-[#d9c964]/50 text-[#d9c964] hover:bg-[#d9c964]/12 hover:border-[#d9c964]`}>{drifting} step{drifting > 1 ? 's' : ''} drifting</button>
+            )}
+            {shapes > 0 && (
+              <button onClick={() => onNavigate('steps')} className={`${chip} border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4]`}>{shapes} output shape{shapes > 1 ? 's' : ''} to review</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Traffic & cost — the secondary, passive metrics */}
+      <div className="flex items-center justify-between gap-4">
+        <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">Traffic &amp; cost</p>
         <SegmentedControl options={rangeOptions} value={range} onChange={setRange} />
       </div>
 
@@ -1138,11 +1135,14 @@ function FreqBars({ buckets }: { buckets: { label: Date; count: number }[] }) {
   );
 }
 
-function DetectionsTab({ incidents, anomalies, runs, registry }: {
+function DetectionsTab({ incidents, anomalies, runs, registry, apiKey, calls, onSelectCall }: {
   incidents: Incident[];
   anomalies: AnomalyRow[];
   runs: AnomalyRun[];
   registry: ConditionRegistry;
+  apiKey: string;
+  calls: Call[];
+  onSelectCall: (c: Call) => void;
 }) {
   const [range, setRange] = useState<TimeRange>('24h');
   const cfg = RANGES[range];
@@ -1217,7 +1217,7 @@ function DetectionsTab({ incidents, anomalies, runs, registry }: {
       {/* Individual anomalies — the per-run drill-down */}
       <div>
         <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-3">Individual anomalies</p>
-        <AnomaliesTab runs={runs} registry={registry} />
+        <AnomaliesTab runs={runs} registry={registry} apiKey={apiKey} calls={calls} onSelectCall={onSelectCall} />
       </div>
     </div>
   );
@@ -1225,11 +1225,40 @@ function DetectionsTab({ incidents, anomalies, runs, registry }: {
 
 // ── Anomalies tab ─────────────────────────────────────────────────────────────
 
-function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: ConditionRegistry }) {
+function AnomaliesTab({ runs, registry, apiKey, calls, onSelectCall }: { runs: AnomalyRun[]; registry: ConditionRegistry; apiKey: string; calls: Call[]; onSelectCall: (c: Call) => void }) {
+  const callFor = (runId: string, stepName: string) => calls.find(c => c.run_id === runId && c.step_name === stepName);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<{ runId: string; text: string; costUsd: number } | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
   const [query, setQuery] = useState('');
+  const [fbBusy, setFbBusy] = useState<string | null>(null);
+  const [verdicts, setVerdicts] = useState<Record<string, { verdict: 'confirm' | 'reject'; text: string }>>({});
+  const [fbError, setFbError] = useState<{ runId: string; text: string } | null>(null);
+
+  async function anomalyVerdict(runId: string, v: 'confirm' | 'reject') {
+    setFbBusy(runId); setFbError(null);
+    try {
+      const res = await fetch(`${BACKEND}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ subject_type: 'anomaly', subject_id: runId, verdict: v }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      let text = 'Confirmed as a real issue — label recorded.';
+      if (v === 'reject') {
+        const n = data.applied?.startsWith('baseline_reincluded:') ? Number(data.applied.split(':')[1]) : null;
+        text = n != null
+          ? `False alarm — ${n} call${n === 1 ? '' : 's'} returned to the baseline.`
+          : 'False alarm recorded — baseline update failed, label kept.';
+      }
+      setVerdicts(vs => ({ ...vs, [runId]: { verdict: v, text } }));
+    } catch (e) {
+      setFbError({ runId, text: String(e) });
+    } finally {
+      setFbBusy(null);
+    }
+  }
 
   async function analyzeRun(runId: string) {
     setAnalyzing(true);
@@ -1288,9 +1317,21 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
 
             {isOpen && (
               <div className="bg-[#281f38] border border-l-0 border-t-0 border-[#3a2f4e] px-5 py-4 space-y-5">
-                {run.steps.map((step) => (
+                {run.steps.map((step) => {
+                  const offending = callFor(run.run_id, step.step_name);
+                  return (
                   <div key={step.step_name}>
-                    <p className="font-mono text-[10px] text-[#9a91ad] uppercase tracking-widest mb-2">{step.step_name}</p>
+                    <div className="flex items-center justify-between gap-2 mb-2">
+                      <p className="font-mono text-[10px] text-[#9a91ad] uppercase tracking-widest">{step.step_name}</p>
+                      {offending && (
+                        <button
+                          onClick={() => onSelectCall(offending)}
+                          className="font-mono text-[10px] text-[#c4a6f2] hover:text-[#e9e4f0] transition-colors shrink-0"
+                        >
+                          view output →
+                        </button>
+                      )}
+                    </div>
                     <div className="space-y-2">
                       {step.codes.map(({ code, score }) => {
                         const info = registry[String(code)];
@@ -1318,20 +1359,46 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
                       step total: {step.codes.reduce((s, c) => s + c.score, 0)} pts
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
-                <div className="flex items-center justify-between pt-3 border-t border-[#3a2f4e]">
+                <div className="flex items-center justify-between gap-3 flex-wrap pt-3 border-t border-[#3a2f4e]">
                   <span className="font-mono text-[10px] text-[#7c7291]">
                     threshold: {ANOMALY_THRESHOLD} pts — total: <span className={run.is_critical ? 'text-[#e0533d] font-bold' : 'text-[#d9c964]'}>{run.total_score} pts</span>
                   </span>
-                  <button
-                    onClick={() => analyzeRun(run.run_id)}
-                    disabled={analyzing}
-                    className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] border border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                  >
-                    {analyzing && analysis?.runId !== run.run_id ? <><span className="animate-spin text-[10px]">◌</span> analyzing…</> : <>✦ analyze</>}
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {verdicts[run.run_id] ? (
+                      <span className="font-mono text-[10px] text-[#7fb59a]">{verdicts[run.run_id].text}</span>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => anomalyVerdict(run.run_id, 'confirm')}
+                          disabled={fbBusy === run.run_id}
+                          className="px-3 py-1.5 font-mono text-[11px] border border-[#7fb59a]/60 text-[#7fb59a] hover:bg-[#7fb59a]/15 hover:border-[#7fb59a] disabled:opacity-40 transition-colors"
+                        >
+                          ✓ real issue
+                        </button>
+                        <button
+                          onClick={() => anomalyVerdict(run.run_id, 'reject')}
+                          disabled={fbBusy === run.run_id}
+                          className="px-3 py-1.5 font-mono text-[11px] border border-[#e0533d]/60 text-[#e0533d] hover:bg-[#e0533d]/15 hover:border-[#e0533d] disabled:opacity-40 transition-colors"
+                        >
+                          {fbBusy === run.run_id ? '…' : '✕ false alarm'}
+                        </button>
+                      </>
+                    )}
+                    <button
+                      onClick={() => analyzeRun(run.run_id)}
+                      disabled={analyzing}
+                      className="flex items-center gap-1.5 px-3 py-1.5 font-mono text-[11px] border border-[#b794f4]/50 text-[#c4a6f2] hover:bg-[#b794f4]/12 hover:border-[#b794f4] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    >
+                      {analyzing && analysis?.runId !== run.run_id ? <><span className="animate-spin text-[10px]">◌</span> analyzing…</> : <>✦ analyze</>}
+                    </button>
+                  </div>
                 </div>
+                {fbError?.runId === run.run_id && (
+                  <p className="font-mono text-[10px] text-[#e0533d]">{fbError.text}</p>
+                )}
                 {analysis && analysis.runId === run.run_id && (
                   <AnalysisPanel text={analysis.text} costUsd={analysis.costUsd} onClose={() => setAnalysis(null)} />
                 )}
@@ -1346,121 +1413,15 @@ function AnomaliesTab({ runs, registry }: { runs: AnomalyRun[]; registry: Condit
 
 // ── Steps health tab ──────────────────────────────────────────────────────────
 
-function StepsHealthTab({ health }: { health: StepHealthRow[] }) {
-  if (health.length === 0) {
-    return <EmptyState text="No step profiles yet — run a trace to create step profiles." />;
-  }
-
-  const order = { critical: 0, degrading: 1, warming: 2, healthy: 3 };
-  const sorted = [...health].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
-  const activeCount  = health.filter(s => s.status !== 'warming').length;
-  const warmingCount = health.filter(s => s.status === 'warming').length;
-
-  function fmtMetric(metric: string, value: number) {
-    if (metric === 'latency_ms') return `${Math.round(value)}ms`;
-    if (metric === 'cost') return `$${value.toFixed(5)}`;
-    return Math.round(value).toLocaleString();
-  }
-
-  function metricLabel(metric: string) {
-    if (metric === 'latency_ms') return 'latency';
-    if (metric === 'total_tokens') return 'tokens';
-    return metric;
-  }
-
-  return (
-    <div className="space-y-2 max-w-3xl">
-
-      {/* L5 status banner */}
-      <div className="bg-[#281f38] border border-[#3a2f4e] px-5 py-3 flex items-center justify-between gap-4 mb-4">
-        <div className="font-mono text-[11px]">
-          <span className="text-[#e9e4f0] font-bold">L5 statistical detection</span>
-          <span className="text-[#7c7291] mx-2">·</span>
-          {activeCount > 0
-            ? <span className="text-[#7fb59a]">{activeCount} step{activeCount !== 1 ? 's' : ''} active</span>
-            : <span className="text-[#7c7291]">no steps active yet</span>
-          }
-          {warmingCount > 0 && <span className="text-[#7c7291] ml-2">· {warmingCount} warming</span>}
-        </div>
-        <span className="font-mono text-[10px] text-[#7c7291] shrink-0">{L5_MIN_SAMPLES} calls/step to activate</span>
-      </div>
-
-      {sorted.map(row => {
-        const isWarming  = row.status === 'warming';
-        const isCritical = row.status === 'critical';
-        const pct = Math.min((row.sample_count / L5_MIN_SAMPLES) * 100, 100);
-
-        const accentBorder = isCritical ? 'border-[#e0533d]'
-          : row.status === 'degrading' ? 'border-[#d9c964]'
-          : isWarming ? 'border-[#3a2f4e]'
-          : 'border-[#7fb59a]';
-
-        return (
-          <div key={row.step_profile_id} className={`bg-[#281f38] border border-[#3a2f4e] border-l-2 ${accentBorder} px-5 py-4`}>
-            <div className="flex items-center justify-between gap-4">
-              <div className="flex items-center gap-3 min-w-0">
-                <span className={[
-                  'w-1.5 h-1.5 rounded-full shrink-0',
-                  isCritical  ? 'bg-[#e0533d]'
-                    : row.status === 'degrading' ? 'bg-[#d9a441]'
-                    : isWarming ? 'bg-[#332946]'
-                    : 'bg-[#7fb59a]',
-                ].join(' ')} />
-                <span className={`font-mono text-sm ${isWarming ? 'text-[#9a91ad]' : 'text-[#c9c2d6]'}`}>
-                  {row.step_name}
-                </span>
-              </div>
-              <div className="flex items-center gap-3 shrink-0">
-                <span className="font-mono text-[10px] text-[#7c7291]">{row.sample_count} calls</span>
-                <Badge variant={isCritical ? 'critical' : row.status === 'degrading' ? 'warning' : row.status === 'warming' ? 'neutral' : 'ok'}>
-                  {row.status}
-                </Badge>
-              </div>
-            </div>
-
-            {isWarming && (
-              <div className="mt-3">
-                <div className="flex justify-between font-mono text-[10px] text-[#7c7291] mb-1.5">
-                  <span>{row.sample_count} / {L5_MIN_SAMPLES} calls to activate L5</span>
-                  <span>{Math.round(pct)}%</span>
-                </div>
-                <div className="h-px bg-[#3a2f4e]">
-                  <div className="h-full bg-[#b794f4]/50 transition-all" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-            )}
-
-            {row.trends.length > 0 && (
-              <div className="mt-3 space-y-2 border-t border-[#3a2f4e] pt-3">
-                {row.trends.map(t => (
-                  <div key={t.metric} className="flex items-center gap-3 font-mono text-[11px]">
-                    <span className="text-[#7c7291] w-16 shrink-0">{metricLabel(t.metric)}</span>
-                    <span className="text-[#7c7291]">baseline <span className="text-[#b3abc4]">{fmtMetric(t.metric, t.baseline_mean)}</span></span>
-                    <span className={t.direction === 'up' ? 'text-[#e0533d]' : 'text-[#7fb59a]'}>{t.direction === 'up' ? '↑' : '↓'}</span>
-                    <span className="text-[#7c7291]">recent <span className={isCritical ? 'text-[#e0533d]' : 'text-[#e6d77f]'}>{fmtMetric(t.metric, t.recent_mean)}</span></span>
-                    <span className={['ml-auto shrink-0 font-bold', Math.abs(t.sigma) >= 2.5 ? 'text-[#e0533d]' : 'text-[#d9c964]'].join(' ')}>
-                      {t.sigma > 0 ? '+' : ''}{t.sigma}×IQR
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Usage tab ─────────────────────────────────────────────────────────────────
-
-function ContractsTab({ contracts, apiKey, onUpdate }: {
+function StepsTab({ health, contracts, apiKey, onContractUpdate }: {
+  health: StepHealthRow[];
   contracts: ContractRow[];
   apiKey: string;
-  onUpdate: (stepProfileId: string, status: ContractRow['status']) => void;
+  onContractUpdate: (stepProfileId: string, status: ContractRow['status']) => void;
 }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg]   = useState<{ ok: boolean; text: string } | null>(null);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [busy, setBusy]         = useState<string | null>(null);
+  const [msg, setMsg]           = useState<{ ok: boolean; text: string } | null>(null);
 
   async function verdict(stepProfileId: string, v: 'confirm' | 'reject') {
     setBusy(stepProfileId); setMsg(null);
@@ -1471,8 +1432,10 @@ function ContractsTab({ contracts, apiKey, onUpdate }: {
         body: JSON.stringify({ subject_type: 'contract', subject_id: stepProfileId, verdict: v }),
       });
       if (!res.ok) throw new Error(await res.text());
-      onUpdate(stepProfileId, v === 'confirm' ? 'enforced' : 'rejected');
-      setMsg({ ok: true, text: v === 'confirm' ? 'Contract enforced — hard violations now score.' : 'Contract rejected — it won\'t be proposed again.' });
+      onContractUpdate(stepProfileId, v === 'confirm' ? 'enforced' : 'rejected');
+      setMsg({ ok: true, text: v === 'confirm'
+        ? 'Output shape enforced — mismatches now count toward detection.'
+        : 'Output shape dismissed — it won’t be suggested again.' });
     } catch (e) {
       setMsg({ ok: false, text: String(e) });
     } finally {
@@ -1480,120 +1443,202 @@ function ContractsTab({ contracts, apiKey, onUpdate }: {
     }
   }
 
-  const withContract = contracts.filter(c => c.status !== 'observing');
-  if (withContract.length === 0) {
-    return <EmptyState text="No learned contracts yet — one is induced once a step profile has 20+ successful outputs." />;
+  if (health.length === 0) {
+    return <EmptyState text="No steps yet — run a trace and Cernova will discover your agent’s steps here." />;
   }
 
-  const order: Record<ContractRow['status'], number> = { proposed: 0, enforced: 1, rejected: 2, observing: 3 };
-  const sorted = [...withContract].sort((a, b) => order[a.status] - order[b.status]);
+  const contractOf = new Map(contracts.map(c => [c.step_profile_id, c] as const));
+  const order = { critical: 0, degrading: 1, warming: 2, healthy: 3 };
+  const sorted = [...health].sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9));
+  const activeCount  = health.filter(s => s.status !== 'warming').length;
+  const warmingCount = health.filter(s => s.status === 'warming').length;
 
-  const badgeFor = (s: ContractRow['status']) =>
-    s === 'proposed' ? <Badge variant="warning">proposed</Badge>
-    : s === 'enforced' ? <Badge variant="ok">enforced</Badge>
-    : s === 'rejected' ? <Badge variant="error">rejected</Badge>
-    : <Badge variant="neutral">observing</Badge>;
+  const fmtMetric = (metric: string, value: number) =>
+    metric === 'latency_ms' ? `${Math.round(value)}ms`
+    : metric === 'cost' ? `$${value.toFixed(5)}`
+    : Math.round(value).toLocaleString();
+  const metricLabel = (metric: string) =>
+    metric === 'latency_ms' ? 'latency' : metric === 'total_tokens' ? 'tokens' : metric;
 
   return (
-    <div>
-      <p className="font-mono text-[11px] text-[#9a91ad] leading-6 mb-5 max-w-2xl">
-        Contracts are learned from each step&apos;s own output history. A <span className="text-[#d9c964]">proposed</span> contract is checked and logged but does not affect scores until you confirm it — then hard violations fold into the anomaly score. Rejecting one retires it.
+    <div className="space-y-2 max-w-3xl">
+      <p className="font-mono text-[11px] text-[#9a91ad] leading-6 mb-4 max-w-2xl">
+        Cernova splits your agent into <span className="text-[#c9c2d6]">steps</span> and learns two things about each:
+        its normal <span className="text-[#c9c2d6]">behavior</span> (latency, cost, tokens) and its expected{' '}
+        <span className="text-[#c9c2d6]">output shape</span>. A step is flagged when either drifts — expand one for detail.
       </p>
-      {msg && <p className={['font-mono text-xs mb-4', msg.ok ? 'text-[#7fb59a]' : 'text-[#e0533d]'].join(' ')}>{msg.text}</p>}
-      <div className="space-y-px bg-[#3a2f4e] border border-[#3a2f4e]">
-        {sorted.map((c) => (
-          <div key={c.step_profile_id} className="bg-[#281f38] p-4">
-            <div className="flex items-start justify-between gap-4 mb-3">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-xs text-[#e9e4f0] font-bold truncate">{c.step_name ?? 'unnamed step'}</span>
-                  {badgeFor(c.status)}
-                </div>
-                <p className="font-mono text-[10px] text-[#7c7291]">
-                  learned from {c.sample_count ?? '—'} outputs · format {c.format ?? 'text'}
-                  {c.format === 'json' && c.json_rate != null && ` · parses as JSON ${Math.round(c.json_rate * 100)}%`}
-                </p>
-              </div>
-              {c.status === 'proposed' && (
-                <div className="flex gap-2 shrink-0">
-                  <button
-                    onClick={() => verdict(c.step_profile_id, 'confirm')}
-                    disabled={busy === c.step_profile_id}
-                    className="px-3 py-1.5 font-mono text-[11px] border border-[#7fb59a]/60 text-[#7fb59a] hover:bg-[#7fb59a]/15 hover:border-[#7fb59a] disabled:opacity-40 transition-colors"
-                  >
-                    {busy === c.step_profile_id ? '…' : '✓ confirm'}
-                  </button>
-                  <button
-                    onClick={() => verdict(c.step_profile_id, 'reject')}
-                    disabled={busy === c.step_profile_id}
-                    className="px-3 py-1.5 font-mono text-[11px] border border-[#e0533d]/60 text-[#e0533d] hover:bg-[#e0533d]/15 hover:border-[#e0533d] disabled:opacity-40 transition-colors"
-                  >
-                    ✕ reject
-                  </button>
-                </div>
-              )}
-            </div>
-            {(() => {
-              const specs = c.keys ? Object.values(c.keys) : [];
-              if (specs.length > 0) {
-                const sorted = [...specs].sort((a, b) => {
-                  const ar = c.required_keys.includes(a.name), br = c.required_keys.includes(b.name);
-                  if (ar !== br) return ar ? -1 : 1;          // required keys first
-                  return b.presence - a.presence;
-                });
-                const constraint = (k: KeySpec) =>
-                  k.enum_values && k.enum_values.length ? `∈ ${k.enum_values.join(' · ')}`
-                  : (k.num_min != null || k.num_max != null) ? `${k.num_min ?? '−∞'} – ${k.num_max ?? '∞'}`
-                  : '—';
-                return (
-                  <div className="border border-[#3a2f4e] overflow-x-auto">
-                    <table className="w-full font-mono text-[10px]">
-                      <thead>
-                        <tr className="border-b border-[#3a2f4e] text-[#7c7291] text-left uppercase tracking-wider">
-                          <th className="px-3 py-1.5 font-normal">key</th>
-                          <th className="px-3 py-1.5 font-normal">type</th>
-                          <th className="px-3 py-1.5 font-normal">required</th>
-                          <th className="px-3 py-1.5 font-normal">constraints</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sorted.map((k) => {
-                          const required = c.required_keys.includes(k.name);
-                          return (
-                            <tr key={k.name} className="border-b border-[#3a2f4e]/50 last:border-0">
-                              <td className="px-3 py-1.5 text-[#cdb9f7]">{k.name}</td>
-                              <td className="px-3 py-1.5 text-[#b3abc4]">{k.types.join(' | ') || '—'}</td>
-                              <td className="px-3 py-1.5">
-                                {required
-                                  ? <span className="text-[#7fb59a]">required</span>
-                                  : <span className="text-[#9a91ad]">{Math.round(k.presence * 100)}%</span>}
-                              </td>
-                              <td className="px-3 py-1.5 text-[#9a91ad]">{constraint(k)}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                );
-              }
-              if (c.required_keys.length > 0) {
-                return (
-                  <div className="flex flex-wrap gap-1.5">
-                    {c.required_keys.map((k) => (
-                      <span key={k} className="font-mono text-[10px] text-[#cdb9f7] bg-[#b794f4]/18 px-1.5 py-0.5">{k}</span>
-                    ))}
-                  </div>
-                );
-              }
-              return <p className="font-mono text-[10px] text-[#7c7291]">Free-form text output — no structural keys.</p>;
-            })()}
-          </div>
-        ))}
+
+      <div className="bg-[#281f38] border border-[#3a2f4e] px-5 py-3 flex items-center justify-between gap-4 mb-2">
+        <div className="font-mono text-[11px]">
+          {activeCount > 0
+            ? <span className="text-[#7fb59a]">{activeCount} step{activeCount !== 1 ? 's' : ''} monitored</span>
+            : <span className="text-[#7c7291]">no steps monitored yet</span>}
+          {warmingCount > 0 && <span className="text-[#7c7291] ml-2">· {warmingCount} still learning</span>}
+        </div>
+        <span className="font-mono text-[10px] text-[#7c7291] shrink-0">{L5_MIN_SAMPLES} calls per step to start</span>
       </div>
+
+      {msg && <p className={['font-mono text-xs mb-2', msg.ok ? 'text-[#7fb59a]' : 'text-[#e0533d]'].join(' ')}>{msg.text}</p>}
+
+      {sorted.map(row => {
+        const c = contractOf.get(row.step_profile_id);
+        const isOpen = expanded === row.step_profile_id;
+        const isWarming = row.status === 'warming';
+        const isCritical = row.status === 'critical';
+        const pct = Math.min((row.sample_count / L5_MIN_SAMPLES) * 100, 100);
+        const statusLabel = isWarming ? 'learning' : row.status;
+        const shape = c && c.status === 'enforced' ? { t: 'output shape enforced', cls: 'text-[#7fb59a]' }
+          : c && c.status === 'proposed' ? { t: 'output shape to review', cls: 'text-[#d9c964]' }
+          : null;
+        const accentBorder = isCritical ? 'border-[#e0533d]'
+          : row.status === 'degrading' ? 'border-[#d9c964]'
+          : isWarming ? 'border-[#3a2f4e]'
+          : 'border-[#7fb59a]';
+
+        return (
+          <div key={row.step_profile_id} className={`bg-[#281f38] border border-[#3a2f4e] border-l-2 ${accentBorder}`}>
+            <button
+              onClick={() => setExpanded(isOpen ? null : row.step_profile_id)}
+              className="w-full flex items-center justify-between gap-4 px-5 py-4 text-left hover:bg-[#2d2440] transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className={['w-1.5 h-1.5 rounded-full shrink-0',
+                  isCritical ? 'bg-[#e0533d]' : row.status === 'degrading' ? 'bg-[#d9a441]' : isWarming ? 'bg-[#332946]' : 'bg-[#7fb59a]'].join(' ')} />
+                <span className={`font-mono text-sm truncate ${isWarming ? 'text-[#9a91ad]' : 'text-[#c9c2d6]'}`}>{row.step_name}</span>
+                <Badge variant={isCritical ? 'critical' : row.status === 'degrading' ? 'warning' : isWarming ? 'neutral' : 'ok'}>{statusLabel}</Badge>
+              </div>
+              <div className="flex items-center gap-3 shrink-0">
+                {shape && <span className={`font-mono text-[10px] ${shape.cls} hidden sm:inline`}>{shape.t}</span>}
+                <span className="font-mono text-[10px] text-[#7c7291]">{row.sample_count} calls</span>
+                <span className="font-mono text-[#7c7291] text-xs">{isOpen ? '▲' : '▼'}</span>
+              </div>
+            </button>
+
+            {isOpen && (
+              <div className="px-5 pb-4 space-y-4 border-t border-[#3a2f4e]">
+                {/* BEHAVIOR */}
+                <div className="pt-3">
+                  <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest mb-2">behavior</p>
+                  {isWarming ? (
+                    <div>
+                      <div className="flex justify-between font-mono text-[10px] text-[#7c7291] mb-1.5">
+                        <span>learning normal behavior — {row.sample_count} / {L5_MIN_SAMPLES} calls</span>
+                        <span>{Math.round(pct)}%</span>
+                      </div>
+                      <div className="h-px bg-[#3a2f4e]"><div className="h-full bg-[#b794f4]/50 transition-all" style={{ width: `${pct}%` }} /></div>
+                    </div>
+                  ) : row.trends.length > 0 ? (
+                    <div className="space-y-2">
+                      {row.trends.map(t => {
+                        const mult = t.baseline_mean > 0 ? t.recent_mean / t.baseline_mean : null;
+                        return (
+                          <div key={t.metric} className="flex items-center gap-3 font-mono text-[11px]">
+                            <span className="text-[#7c7291] w-16 shrink-0">{metricLabel(t.metric)}</span>
+                            <span className="text-[#b3abc4]">{fmtMetric(t.metric, t.baseline_mean)}</span>
+                            <span className={t.direction === 'up' ? 'text-[#e0533d]' : 'text-[#7fb59a]'}>→</span>
+                            <span className={isCritical ? 'text-[#e0533d]' : 'text-[#e6d77f]'}>{fmtMetric(t.metric, t.recent_mean)}</span>
+                            {mult != null && <span className={['ml-auto shrink-0 font-bold', mult >= 2.5 || mult <= 0.4 ? 'text-[#e0533d]' : 'text-[#d9c964]'].join(' ')}>{mult.toFixed(1)}× normal</span>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="font-mono text-[11px] text-[#7fb59a]">Normal — no drift in latency, cost, or tokens.</p>
+                  )}
+                </div>
+
+                {/* OUTPUT SHAPE */}
+                <div>
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <p className="font-mono text-[10px] text-[#7c7291] uppercase tracking-widest">output shape</p>
+                    {c?.status === 'proposed' && (
+                      <div className="flex gap-2 shrink-0">
+                        <button onClick={() => verdict(c.step_profile_id, 'confirm')} disabled={busy === c.step_profile_id}
+                          className="px-3 py-1 font-mono text-[11px] border border-[#7fb59a]/60 text-[#7fb59a] hover:bg-[#7fb59a]/15 hover:border-[#7fb59a] disabled:opacity-40 transition-colors">
+                          {busy === c.step_profile_id ? '…' : '✓ correct'}
+                        </button>
+                        <button onClick={() => verdict(c.step_profile_id, 'reject')} disabled={busy === c.step_profile_id}
+                          className="px-3 py-1 font-mono text-[11px] border border-[#e0533d]/60 text-[#e0533d] hover:bg-[#e0533d]/15 hover:border-[#e0533d] disabled:opacity-40 transition-colors">
+                          ✕ not right
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {(() => {
+                    if (!c || c.status === 'observing') {
+                      return <p className="font-mono text-[11px] text-[#7c7291]">Still learning this step’s output shape (needs {L5_MIN_SAMPLES}+ successful outputs).</p>;
+                    }
+                    if (c.status === 'rejected') {
+                      return <p className="font-mono text-[11px] text-[#7c7291]">Output-shape checks dismissed for this step.</p>;
+                    }
+                    const specs = c.keys ? Object.values(c.keys) : [];
+                    const constraint = (k: KeySpec) =>
+                      k.enum_values && k.enum_values.length ? `∈ ${k.enum_values.join(' · ')}`
+                      : (k.num_min != null || k.num_max != null) ? `${k.num_min ?? '−∞'} – ${k.num_max ?? '∞'}`
+                      : '—';
+                    return (
+                      <div>
+                        <p className="font-mono text-[10px] text-[#7c7291] mb-2">
+                          learned from {c.sample_count ?? '—'} outputs · {c.format ?? 'text'}
+                          {c.format === 'json' && c.json_rate != null && ` · valid JSON ${Math.round(c.json_rate * 100)}%`}
+                          {' · '}
+                          {c.status === 'enforced'
+                            ? <span className="text-[#7fb59a]">enforced</span>
+                            : <span className="text-[#d9c964]">watching — confirm to enforce</span>}
+                        </p>
+                        {specs.length > 0 ? (
+                          <div className="border border-[#3a2f4e] overflow-x-auto">
+                            <table className="w-full font-mono text-[10px]">
+                              <thead>
+                                <tr className="border-b border-[#3a2f4e] text-[#7c7291] text-left uppercase tracking-wider">
+                                  <th className="px-3 py-1.5 font-normal">key</th>
+                                  <th className="px-3 py-1.5 font-normal">type</th>
+                                  <th className="px-3 py-1.5 font-normal">required</th>
+                                  <th className="px-3 py-1.5 font-normal">constraints</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {[...specs].sort((a, b) => {
+                                  const ar = c.required_keys.includes(a.name), br = c.required_keys.includes(b.name);
+                                  if (ar !== br) return ar ? -1 : 1;
+                                  return b.presence - a.presence;
+                                }).map((k) => {
+                                  const required = c.required_keys.includes(k.name);
+                                  return (
+                                    <tr key={k.name} className="border-b border-[#3a2f4e]/50 last:border-0">
+                                      <td className="px-3 py-1.5 text-[#cdb9f7]">{k.name}</td>
+                                      <td className="px-3 py-1.5 text-[#b3abc4]">{k.types.join(' | ') || '—'}</td>
+                                      <td className="px-3 py-1.5">{required ? <span className="text-[#7fb59a]">required</span> : <span className="text-[#9a91ad]">{Math.round(k.presence * 100)}%</span>}</td>
+                                      <td className="px-3 py-1.5 text-[#9a91ad]">{constraint(k)}</td>
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        ) : c.required_keys.length > 0 ? (
+                          <div className="flex flex-wrap gap-1.5">
+                            {c.required_keys.map((k) => (
+                              <span key={k} className="font-mono text-[10px] text-[#cdb9f7] bg-[#b794f4]/18 px-1.5 py-0.5">{k}</span>
+                            ))}
+                          </div>
+                        ) : (
+                          <p className="font-mono text-[10px] text-[#7c7291]">Free-form text output — no structural keys.</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
+
+// ── Usage tab ─────────────────────────────────────────────────────────────────
 
 function UsageTab({ project }: { project: Project }) {
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:8000';
