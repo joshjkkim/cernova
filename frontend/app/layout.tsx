@@ -27,8 +27,9 @@ const courierPrime = Courier_Prime({
 });
 
 export const metadata: Metadata = {
-  title: "Cernova",
-  description: "Observability for AI workflows",
+  title: "Cernova — the maintenance layer for AI agents",
+  description:
+    "Cernova catches your AI agent's silent failures. It learns what each step normally does and tells you the moment one breaks: what broke, why, and the fix.",
 };
 
 export default function RootLayout({

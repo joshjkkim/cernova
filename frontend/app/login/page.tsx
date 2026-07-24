@@ -25,6 +25,9 @@ export default function LoginPage() {
           <p className="font-mono text-[11px] text-[#9a91ad] mt-2">sign in to your account</p>
         </div>
         <AuthForm />
+        <p className="mt-6 text-center">
+          <a href="/" className="font-mono text-[11px] text-[#9a91ad] hover:text-[#e9e4f0] transition-colors">← back to home</a>
+        </p>
       </div>
     </main>
   );
