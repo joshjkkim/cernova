@@ -1,6 +1,7 @@
 import type { Tracer } from '../tracer';
 import { getCost } from '../cost';
 import { getActiveSpanId, runWithSpan } from '../context';
+import { captureCallSite, maybeLogCallSite, callSiteFields } from '../callsite';
 import { uuid } from '../uuid';
 
 export interface OpenAIMessage {
@@ -69,6 +70,9 @@ export function wrapOpenAI(client: OpenAIClientLike, tracer: Tracer): TracedOpen
           const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
           const spanId = uuid();
           const parentSpanId = getActiveSpanId();
+          const callSite = captureCallSite(tracer.sourceRoot); // sync, before any await
+          maybeLogCallSite(callSite, stepName);
+          const prov = callSiteFields(callSite, tracer.commitSha);
           const start = Date.now();
           const { system, messages } = extractSystemAndMessages(params.messages);
 
@@ -84,6 +88,7 @@ export function wrapOpenAI(client: OpenAIClientLike, tracer: Tracer): TracedOpen
             const model         = response.model ?? cleanParams.model;
 
             tracer.ingest({
+              ...prov,
               run_id: tracer.runId,
               step_name: stepName,
               step_index: currentStep,
@@ -106,6 +111,7 @@ export function wrapOpenAI(client: OpenAIClientLike, tracer: Tracer): TracedOpen
             const message = err instanceof Error ? err.message : String(err);
 
             tracer.ingest({
+              ...prov,
               run_id: tracer.runId,
               step_name: stepName,
               step_index: currentStep,

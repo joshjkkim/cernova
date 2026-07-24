@@ -27,6 +27,31 @@ def test_cursor_bad_input_is_zero():
     assert decode_cursor("") == 0
 
 
+# ── call projection ───────────────────────────────────────────────────────────
+
+def test_from_row_projects_call_site_provenance():
+    call = TraceCall.from_row({
+        "id": 7, "status_success": True,
+        "code_filepath": "sample-app/chatbot.ts",
+        "code_lineno": 256,
+        "code_function": "runWorkflow",
+        "commit_sha": "6de62be",
+    })
+    assert call.code_filepath == "sample-app/chatbot.ts"
+    assert call.code_lineno == 256
+    assert call.code_function == "runWorkflow"
+    assert call.commit_sha == "6de62be"
+
+
+def test_from_row_provenance_absent_is_none():
+    """OTel imports and pre-0.1.6 SDKs write no provenance — must not blow up."""
+    call = TraceCall.from_row({"id": 7, "status_success": True})
+    assert call.code_filepath is None
+    assert call.code_lineno is None
+    assert call.code_function is None
+    assert call.commit_sha is None
+
+
 # ── anomaly grouping ──────────────────────────────────────────────────────────
 
 def _arow(run_id, step, code, score, at):

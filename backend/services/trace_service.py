@@ -31,6 +31,12 @@ def ingest_trace(payload: CanonicalTrace) -> str:
         # unique index on (project_id, source, external_id) makes re-imports safe.
         "source":          payload.source,
         "external_id":     payload.external_id,
+        # Call-site provenance — where in the user's code the call was made.
+        # None (older SDKs / imports) → stripped below, column stays NULL.
+        "commit_sha":      payload.commit_sha,
+        "code_filepath":   payload.code_filepath,
+        "code_lineno":     payload.code_lineno,
+        "code_function":   payload.code_function,
     }
     # Remove None values so Supabase uses column defaults
     data = {k: v for k, v in data.items() if v is not None}

@@ -324,6 +324,24 @@ await run.messages.create({
         { f: 'output_code',    d: "The model's response text. Used by the anomaly engine for shape analysis." },
         { f: 'error',          d: 'Error message. Required when status_success is false.' },
       ]} />
+
+      <H3>Call-site provenance</H3>
+      <P>Wrapped calls also record <em>where in your code</em> they were made. The SDK walks the stack at the moment of the call — before any await — and keeps the first frame outside the SDK, so an anomaly points at a line instead of just a step name.</P>
+      <Code lang="json">{`{
+  "step_name":     "classify-intent",
+  "code_filepath": "src/workflow.ts",
+  "code_lineno":   256,
+  "code_function": "runWorkflow",
+  "commit_sha":    "6de62be"
+}`}</Code>
+      <P>Paths are relative to your repository root, resolved from the nearest <code className="text-[#b794f4] f-type">.git</code> directory. Override with <code className="text-[#b794f4] f-type">CERNOVA_SOURCE_ROOT</code> or the <code className="text-[#b794f4] f-type">sourceRoot</code> option. Nothing from your source files is transmitted — only the path, line, and function name.</P>
+      <P><code className="text-[#b794f4] f-type">commit_sha</code> is what anchors a line number to a revision, and is read from <code className="text-[#b794f4] f-type">CERNOVA_COMMIT_SHA</code>, <code className="text-[#b794f4] f-type">VERCEL_GIT_COMMIT_SHA</code>, <code className="text-[#b794f4] f-type">GITHUB_SHA</code>, <code className="text-[#b794f4] f-type">RAILWAY_GIT_COMMIT_SHA</code>, or <code className="text-[#b794f4] f-type">GIT_COMMIT</code>. Most CI platforms set one of these for you; locally there is usually none.</P>
+      <Callout type="warn">
+        <strong className="text-[#e9e4f0]">TypeScript in production:</strong> if you compile with <code className="text-[#e9e4f0]">tsc</code> and run <code className="text-[#e9e4f0]">node dist/app.js</code>, line numbers refer to the <em>compiled JavaScript</em>, not your TypeScript. Start your app with <code className="text-[#e9e4f0]">--enable-source-maps</code> (or <code className="text-[#e9e4f0]">NODE_OPTIONS=--enable-source-maps</code>) to get real source lines. <code className="text-[#e9e4f0]">sourceMap: true</code> in tsconfig alone is not enough — Node ignores map files unless the flag is set. Runners that enable source maps for you, like <code className="text-[#e9e4f0]">tsx</code>, need no change.
+      </Callout>
+      <Callout type="info">
+        The captured frame is the <em>immediate</em> caller. If you wrap model calls in a shared helper, every call site resolves to that helper — use <code className="text-[#e9e4f0]">step_name</code> to tell them apart.
+      </Callout>
     </>
   );
 }

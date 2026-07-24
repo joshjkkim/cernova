@@ -39,6 +39,112 @@ function runWithSpan(spanId, fn) {
   return spanStorage.run({ spanId }, fn);
 }
 
+// src/callsite.ts
+import { existsSync } from "fs";
+import { findSourceMap } from "module";
+import { dirname, join, resolve, relative, isAbsolute } from "path";
+import { fileURLToPath } from "url";
+var SDK_FILE = (() => {
+  const orig = Error.prepareStackTrace;
+  Error.prepareStackTrace = (_e, frames2) => frames2;
+  const holder = {};
+  Error.captureStackTrace(holder);
+  const frames = holder.stack;
+  Error.prepareStackTrace = orig;
+  return normalizeFile(frames?.[0]?.getFileName() ?? "");
+})();
+function normalizeFile(file) {
+  return file.startsWith("file:") ? fileURLToPath(file) : file;
+}
+function isSdkFrame(file) {
+  return file === SDK_FILE || file.includes("/node_modules/");
+}
+function findUp(markers, start) {
+  let dir = resolve(start);
+  for (; ; ) {
+    for (const m of markers) if (existsSync(join(dir, m))) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+function resolveSourceRoot(explicit) {
+  if (explicit) return { root: resolve(explicit), how: "config.sourceRoot" };
+  const env = process.env.CERNOVA_SOURCE_ROOT;
+  if (env) return { root: resolve(env), how: "env CERNOVA_SOURCE_ROOT" };
+  const git = findUp([".git"], process.cwd());
+  if (git) return { root: git, how: "nearest .git" };
+  const pkg = findUp(["package.json", "pyproject.toml", "go.mod"], process.cwd());
+  if (pkg) return { root: pkg, how: "nearest package marker" };
+  return { root: process.cwd(), how: "process.cwd() fallback" };
+}
+function toRepoRelative(absFile, root) {
+  const rel = relative(root, absFile);
+  return !rel.startsWith("..") && !isAbsolute(rel) ? rel : absFile;
+}
+function applySourceMap(rawFile, pos) {
+  let map;
+  try {
+    map = findSourceMap(rawFile) ?? findSourceMap(pos.file);
+  } catch {
+    return pos;
+  }
+  if (!map) return pos;
+  const entry = map.findEntry(pos.line - 1, pos.column - 1);
+  if (!entry || !("originalSource" in entry) || entry.originalSource === void 0) return pos;
+  return {
+    file: normalizeFile(entry.originalSource),
+    line: entry.originalLine + 1,
+    column: entry.originalColumn + 1
+  };
+}
+function captureCallSite(sourceRoot) {
+  const orig = Error.prepareStackTrace;
+  Error.prepareStackTrace = (_e, frames2) => frames2;
+  const holder = {};
+  Error.captureStackTrace(holder, captureCallSite);
+  const frames = holder.stack ?? [];
+  Error.prepareStackTrace = orig;
+  for (const f of frames) {
+    const raw = f.getFileName();
+    if (!raw) continue;
+    const file = normalizeFile(raw);
+    if (isSdkFrame(file)) continue;
+    const pos = applySourceMap(raw, {
+      file,
+      line: f.getLineNumber() ?? 0,
+      column: f.getColumnNumber() ?? 0
+    });
+    return {
+      file: toRepoRelative(pos.file, sourceRoot),
+      line: pos.line,
+      column: pos.column,
+      function: f.getFunctionName() ?? f.getMethodName() ?? "<anonymous>"
+    };
+  }
+  return null;
+}
+function detectCommitSha() {
+  return process.env.CERNOVA_COMMIT_SHA || process.env.VERCEL_GIT_COMMIT_SHA || process.env.GITHUB_SHA || process.env.RAILWAY_GIT_COMMIT_SHA || process.env.GIT_COMMIT || void 0;
+}
+function callSiteFields(site, commitSha) {
+  return {
+    code_filepath: site?.file,
+    code_lineno: site?.line,
+    code_function: site?.function,
+    commit_sha: commitSha
+  };
+}
+var CALLSITE_DEBUG = !!process.env.CERNOVA_CALLSITE_DEBUG;
+function maybeLogCallSite(site, stepName) {
+  if (!CALLSITE_DEBUG) return;
+  if (site) {
+    console.log(`[cernova] ${stepName} @ ${site.file}:${site.line}:${site.column} (${site.function})`);
+  } else {
+    console.log(`[cernova] ${stepName} @ <no user frame resolved>`);
+  }
+}
+
 // src/uuid.ts
 function uuid() {
   return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
@@ -69,6 +175,9 @@ var TracedRun = class {
     const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
     const spanId = uuid();
     const parentSpanId = getActiveSpanId();
+    const callSite = captureCallSite(this.tracer.sourceRoot);
+    maybeLogCallSite(callSite, stepName);
+    const prov = callSiteFields(callSite, this.tracer.commitSha);
     const start = Date.now();
     try {
       const response = await runWithSpan(
@@ -81,6 +190,7 @@ var TracedRun = class {
       const total_tokens = input_tokens + output_tokens;
       const model = response.model ?? cleanParams.model;
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -101,6 +211,7 @@ var TracedRun = class {
       const latency_ms = Date.now() - start;
       const message = err instanceof Error ? err.message : String(err);
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -125,6 +236,9 @@ var TracedRun = class {
     const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
     const spanId = uuid();
     const parentSpanId = getActiveSpanId();
+    const callSite = captureCallSite(this.tracer.sourceRoot);
+    maybeLogCallSite(callSite, stepName);
+    const prov = callSiteFields(callSite, this.tracer.commitSha);
     const start = Date.now();
     if (!this.client.messages.stream) {
       throw new Error("[cernova] This Anthropic client does not support streaming.");
@@ -137,6 +251,7 @@ var TracedRun = class {
       const total_tokens = input_tokens + output_tokens;
       const model = response.model ?? cleanParams.model;
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -155,6 +270,7 @@ var TracedRun = class {
     }).catch((err) => {
       const latency_ms = Date.now() - start;
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -190,6 +306,9 @@ function wrapAnthropic(client, tracer) {
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
         const spanId = uuid();
         const parentSpanId = getActiveSpanId();
+        const callSite = captureCallSite(tracer.sourceRoot);
+        maybeLogCallSite(callSite, stepName);
+        const prov = callSiteFields(callSite, tracer.commitSha);
         const start = Date.now();
         try {
           const response = await runWithSpan(
@@ -202,6 +321,7 @@ function wrapAnthropic(client, tracer) {
           const total_tokens = input_tokens + output_tokens;
           const model = response.model ?? cleanParams.model;
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -222,6 +342,7 @@ function wrapAnthropic(client, tracer) {
           const latency_ms = Date.now() - start;
           const message = err instanceof Error ? err.message : String(err);
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -246,6 +367,9 @@ function wrapAnthropic(client, tracer) {
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
         const spanId = uuid();
         const parentSpanId = getActiveSpanId();
+        const callSite = captureCallSite(tracer.sourceRoot);
+        maybeLogCallSite(callSite, stepName);
+        const prov = callSiteFields(callSite, tracer.commitSha);
         const start = Date.now();
         if (!client.messages.stream) {
           throw new Error("[cernova] This Anthropic client does not support streaming.");
@@ -258,6 +382,7 @@ function wrapAnthropic(client, tracer) {
           const total_tokens = input_tokens + output_tokens;
           const model = response.model ?? cleanParams.model;
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -276,6 +401,7 @@ function wrapAnthropic(client, tracer) {
         }).catch((err) => {
           const latency_ms = Date.now() - start;
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -321,6 +447,9 @@ function wrapOpenAI(client, tracer) {
           const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
           const spanId = uuid();
           const parentSpanId = getActiveSpanId();
+          const callSite = captureCallSite(tracer.sourceRoot);
+          maybeLogCallSite(callSite, stepName);
+          const prov = callSiteFields(callSite, tracer.commitSha);
           const start = Date.now();
           const { system, messages } = extractSystemAndMessages(params.messages);
           try {
@@ -334,6 +463,7 @@ function wrapOpenAI(client, tracer) {
             const total_tokens = response.usage?.total_tokens ?? input_tokens + output_tokens;
             const model = response.model ?? cleanParams.model;
             tracer.ingest({
+              ...prov,
               run_id: tracer.runId,
               step_name: stepName,
               step_index: currentStep,
@@ -354,6 +484,7 @@ function wrapOpenAI(client, tracer) {
             const latency_ms = Date.now() - start;
             const message = err instanceof Error ? err.message : String(err);
             tracer.ingest({
+              ...prov,
               run_id: tracer.runId,
               step_name: stepName,
               step_index: currentStep,
@@ -385,6 +516,12 @@ var Tracer = class {
     this.apiUrl = (config.apiUrl ?? DEFAULT_API_URL).replace(/\/$/, "");
     this.apiKey = config.apiKey;
     this.runId = config.runId ?? uuid();
+    this.commitSha = config.commitSha ?? detectCommitSha();
+    const resolved = resolveSourceRoot(config.sourceRoot);
+    this.sourceRoot = resolved.root;
+    if (process.env.CERNOVA_CALLSITE_DEBUG) {
+      console.log(`[cernova] sourceRoot = ${resolved.root} (via ${resolved.how})`);
+    }
   }
   ingest(payload) {
     return fetch(`${this.apiUrl}/ingest`, {
@@ -409,6 +546,8 @@ var Tracer = class {
 export {
   TracedRun,
   Tracer,
-  getCost
+  captureCallSite,
+  getCost,
+  resolveSourceRoot
 };
 //# sourceMappingURL=index.mjs.map

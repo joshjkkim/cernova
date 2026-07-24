@@ -35,6 +35,14 @@ class TraceCall(BaseModel):
     source: str | None = None
     created_at: str | None = None
 
+    # Call-site provenance — WHERE in the user's code this call was made. Lets an
+    # agent jump to the source instead of grepping. NULL for OTel imports and
+    # pre-0.1.6 SDKs; commit_sha is what anchors the line number to a revision.
+    code_filepath: str | None = None
+    code_lineno: int | None = None
+    code_function: str | None = None
+    commit_sha: str | None = None
+
     @classmethod
     def from_row(cls, row: dict) -> "TraceCall":
         ss = row.get("status_success")
@@ -55,6 +63,10 @@ class TraceCall(BaseModel):
             step_profile_id=row.get("step_profile_id"),
             source=row.get("source"),
             created_at=row.get("created_at"),
+            code_filepath=row.get("code_filepath"),
+            code_lineno=row.get("code_lineno"),
+            code_function=row.get("code_function"),
+            commit_sha=row.get("commit_sha"),
         )
 
 
@@ -70,6 +82,12 @@ class AnomalyCode(BaseModel):
     code: int
     name: str
     penalty: float
+    # Why it fired. `expected` is the rule ("<= 240", the enum domain, the
+    # statistical fence); `observed` is the actual value. Both None for codes
+    # recorded before the evidence migration, and `observed` is deliberately
+    # never stored for output_format codes (it would be model output text).
+    observed: object | None = None
+    expected: object | None = None
 
 
 class AnomalyStep(BaseModel):
