@@ -3,6 +3,7 @@ import type { Tracer } from './tracer';
 import type { AnthropicClientLike, MessageStreamLike, TracedMessageParams, TracedStreamParams } from './types';
 import { getCost } from './cost';
 import { getActiveSpanId, runWithSpan } from './context';
+import { captureCallSite, maybeLogCallSite, callSiteFields } from './callsite';
 import { uuid } from './uuid';
 
 function extractOutputCode(response: Message): string | undefined {
@@ -38,6 +39,9 @@ export class TracedRun {
     const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
     const spanId = uuid();
     const parentSpanId = getActiveSpanId();
+    const callSite = captureCallSite(this.tracer.sourceRoot); // sync, before any await
+    maybeLogCallSite(callSite, stepName);
+    const prov = callSiteFields(callSite, this.tracer.commitSha);
     const start = Date.now();
 
     try {
@@ -52,6 +56,7 @@ export class TracedRun {
       const model         = response.model ?? cleanParams.model;
 
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -74,6 +79,7 @@ export class TracedRun {
       const message = err instanceof Error ? err.message : String(err);
 
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -100,6 +106,9 @@ export class TracedRun {
     const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
     const spanId = uuid();
     const parentSpanId = getActiveSpanId();
+    const callSite = captureCallSite(this.tracer.sourceRoot); // sync, before any await
+    maybeLogCallSite(callSite, stepName);
+    const prov = callSiteFields(callSite, this.tracer.commitSha);
     const start = Date.now();
 
     if (!this.client.messages.stream) {
@@ -114,6 +123,7 @@ export class TracedRun {
       const total_tokens  = input_tokens + output_tokens;
       const model         = response.model ?? cleanParams.model;
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,
@@ -132,6 +142,7 @@ export class TracedRun {
     }).catch((err: unknown) => {
       const latency_ms = Date.now() - start;
       this.tracer.ingest({
+        ...prov,
         run_id: this.runId,
         step_name: stepName,
         step_index: currentStep,

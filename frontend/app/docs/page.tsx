@@ -99,7 +99,7 @@ const SECTIONS: { id: Section; label: string; sub: string }[] = [
   { id: 'start',        label: 'Getting started', sub: 'quick start, concepts, install' },
   { id: 'sdk',          label: 'SDK reference',   sub: 'TypeScript · Python / LangChain' },
   { id: 'detection',    label: 'Anomaly detection', sub: 'layers, contracts, confirmations' },
-  { id: 'integrations', label: 'Integrations',    sub: 'import, OpenTelemetry, Slack, Sentry' },
+  { id: 'integrations', label: 'Integrations',    sub: 'OpenTelemetry, import, Read API, MCP' },
 ];
 
 // ── Section: Getting started ──────────────────────────────────────────────────
@@ -324,6 +324,24 @@ await run.messages.create({
         { f: 'output_code',    d: "The model's response text. Used by the anomaly engine for shape analysis." },
         { f: 'error',          d: 'Error message. Required when status_success is false.' },
       ]} />
+
+      <H3>Call-site provenance</H3>
+      <P>Wrapped calls also record <em>where in your code</em> they were made. The SDK walks the stack at the moment of the call — before any await — and keeps the first frame outside the SDK, so an anomaly points at a line instead of just a step name.</P>
+      <Code lang="json">{`{
+  "step_name":     "classify-intent",
+  "code_filepath": "src/workflow.ts",
+  "code_lineno":   256,
+  "code_function": "runWorkflow",
+  "commit_sha":    "6de62be"
+}`}</Code>
+      <P>Paths are relative to your repository root, resolved from the nearest <code className="text-[#b794f4] f-type">.git</code> directory. Override with <code className="text-[#b794f4] f-type">CERNOVA_SOURCE_ROOT</code> or the <code className="text-[#b794f4] f-type">sourceRoot</code> option. Nothing from your source files is transmitted — only the path, line, and function name.</P>
+      <P><code className="text-[#b794f4] f-type">commit_sha</code> is what anchors a line number to a revision, and is read from <code className="text-[#b794f4] f-type">CERNOVA_COMMIT_SHA</code>, <code className="text-[#b794f4] f-type">VERCEL_GIT_COMMIT_SHA</code>, <code className="text-[#b794f4] f-type">GITHUB_SHA</code>, <code className="text-[#b794f4] f-type">RAILWAY_GIT_COMMIT_SHA</code>, or <code className="text-[#b794f4] f-type">GIT_COMMIT</code>. Most CI platforms set one of these for you; locally there is usually none.</P>
+      <Callout type="warn">
+        <strong className="text-[#e9e4f0]">TypeScript in production:</strong> if you compile with <code className="text-[#e9e4f0]">tsc</code> and run <code className="text-[#e9e4f0]">node dist/app.js</code>, line numbers refer to the <em>compiled JavaScript</em>, not your TypeScript. Start your app with <code className="text-[#e9e4f0]">--enable-source-maps</code> (or <code className="text-[#e9e4f0]">NODE_OPTIONS=--enable-source-maps</code>) to get real source lines. <code className="text-[#e9e4f0]">sourceMap: true</code> in tsconfig alone is not enough — Node ignores map files unless the flag is set. Runners that enable source maps for you, like <code className="text-[#e9e4f0]">tsx</code>, need no change.
+      </Callout>
+      <Callout type="info">
+        The captured frame is the <em>immediate</em> caller. If you wrap model calls in a shared helper, every call site resolves to that helper — use <code className="text-[#e9e4f0]">step_name</code> to tell them apart.
+      </Callout>
     </>
   );
 }
@@ -457,6 +475,17 @@ function SectionDetection() {
           </div>
         ))}
       </div>
+
+      <H2>Evidence</H2>
+      <P>A fired condition records not just <em>that</em> it fired but the values behind it — <code className="text-[#b794f4] f-type">observed</code>, the actual value, and <code className="text-[#b794f4] f-type">expected</code>, the rule it violated. Both are returned by the Read API and the MCP server alongside the code, so &ldquo;latency_iqr_fence, 100pts&rdquo; becomes a diagnosis rather than a label.</P>
+      <Rows items={[
+        { key: '1001', color: 'text-[#e0533d]', value: 'status_failure — observed false · expected true' },
+        { key: '4001', color: 'text-[#b794f4]', value: 'latency_threshold — observed 3400 · expected "<= 240"' },
+        { key: '2003', color: 'text-[#b794f4]', value: 'enum_contract_violation — expected ["billing","technical","general"] · observed withheld' },
+      ]} />
+      <Callout type="info">
+        <strong className="text-[#e9e4f0]">Your model&apos;s output is never stored as evidence.</strong> For format conditions the observed value would be the response text itself, so it is dropped and only <code className="text-[#e9e4f0]">expected</code> is kept. Everywhere else <code className="text-[#e9e4f0]">observed</code> is a number, a boolean, or an error string.
+      </Callout>
 
       <H2>Step identity and fingerprinting</H2>
       <P>Each step is assigned a stable semantic identity called a <strong className="text-[#e9e4f0]">step profile</strong> — derived from the embedding of its system prompt using a local sentence-transformers model (all-MiniLM-L6-v2, 384 dimensions). This identity persists across renames, minor prompt rewrites, and pipeline restructuring.</P>
@@ -694,6 +723,36 @@ curl "https://api.cernova.dev/v1/runs/<run_id>" \\
       <P>List endpoints return <code className="text-[#b794f4] f-type">{`{ data, has_more, next_cursor }`}</code> — pass <code className="text-[#b794f4] f-type">next_cursor</code> back as <code className="text-[#b794f4] f-type">?cursor=</code> for the next page. Filter <code className="text-[#b794f4] f-type">/v1/calls</code> by <code className="text-[#b794f4] f-type">since</code>, <code className="text-[#b794f4] f-type">step_name</code>, <code className="text-[#b794f4] f-type">run_id</code>, <code className="text-[#b794f4] f-type">model</code>, <code className="text-[#b794f4] f-type">status</code>, and <code className="text-[#b794f4] f-type">anomalous</code>; filter <code className="text-[#b794f4] f-type">/v1/anomalies</code> by <code className="text-[#b794f4] f-type">since</code>, <code className="text-[#b794f4] f-type">level</code>, and <code className="text-[#b794f4] f-type">step_name</code>.</P>
       <Callout type="info">
         Responses are a stable public projection, versioned via <code className="text-[#e9e4f0]">schema_version</code> — the same additive contract as webhooks. Raw prompts and model outputs are omitted from Read API responses.
+      </Callout>
+      <P>Calls carry their call-site provenance — <code className="text-[#b794f4] f-type">code_filepath</code>, <code className="text-[#b794f4] f-type">code_lineno</code>, <code className="text-[#b794f4] f-type">code_function</code>, <code className="text-[#b794f4] f-type">commit_sha</code> — and each anomaly code carries the evidence behind it, so a consumer can act without a second lookup:</P>
+      <Code lang="json">{`{
+  "step_name": "extract-context",
+  "score": 100,
+  "codes": [
+    {
+      "code": 5001,
+      "name": "latency_iqr_fence",
+      "penalty": 100,
+      "observed": 3400,
+      "expected": "conformal: p=0.0021 <= 0.05 (n=847 clean samples)"
+    }
+  ]
+}`}</Code>
+
+      <H2>MCP server</H2>
+      <P>Query your traces from a coding agent. <code className="text-[#b794f4] f-type">@cernova/mcp</code> exposes the Read API over the Model Context Protocol, so tools like Claude Code can answer &ldquo;what&rsquo;s broken in my pipeline?&rdquo; without you opening a dashboard — and because calls carry provenance, jump straight to the line that produced the anomaly.</P>
+      <Code lang="bash">{`claude mcp add cernova \\
+  --env CERNOVA_API_KEY=<CERNOVA_API_KEY> \\
+  -- npx -y @cernova/mcp`}</Code>
+      <P>Three tools, one per Read API endpoint — the agent composes them itself:</P>
+      <Table rows={[
+        { f: 'list_anomalies', d: 'Anomalies grouped by run, newest first, with the codes that fired and their evidence. Filter by level, step_name, since. The usual starting point.' },
+        { f: 'get_run',        d: 'One run in full — every call in step order with its source location, plus the anomaly summary and cost/token/latency totals.' },
+        { f: 'list_calls',     d: 'Individual calls. Filter by step_name, run_id, model, status, or anomalous, to compare a failing call against healthy ones.' },
+      ]} />
+      <P>Set <code className="text-[#b794f4] f-type">CERNOVA_API_URL</code> to point at a self-hosted backend; it defaults to the hosted API. The server reads only — it issues <code className="text-[#b794f4] f-type">GET</code> requests and never uploads anything.</P>
+      <Callout type="tip">
+        Line numbers are only as good as your build. See <span className="text-[#e9e4f0]">Call-site provenance</span> in the SDK reference if an anomaly points at the wrong line.
       </Callout>
     </div>
   );

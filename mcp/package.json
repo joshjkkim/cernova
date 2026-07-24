@@ -1,0 +1,27 @@
+{
+  "name": "@cernova/mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Cernova — lets an agent read scored LLM traces, detected anomalies, and the call sites that produced them",
+  "type": "module",
+  "bin": {
+    "cernova-mcp": "dist/index.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsup": "^8.0.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

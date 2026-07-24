@@ -72,4 +72,8 @@ def to_canonical(payload: IngestPayload) -> CanonicalTrace:
         output_text=payload.output_code,
         source="cernova-sdk",
         schema_version=payload.schema_version,
+        commit_sha=payload.commit_sha,
+        code_filepath=payload.code_filepath,
+        code_lineno=payload.code_lineno,
+        code_function=payload.code_function,
     )

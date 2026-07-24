@@ -8,6 +8,19 @@ interface TraceConfig {
     runId?: string;
     /** Override the ingest endpoint. Defaults to cernova's servers. For local dev only. */
     apiUrl?: string;
+    /**
+     * Repo root used to make captured call-site paths repo-relative. Auto-detected
+     * (nearest .git, then package marker, then cwd) when omitted; set this — or the
+     * CERNOVA_SOURCE_ROOT env var — when running from a build dir or container where
+     * auto-detection can't find the root.
+     */
+    sourceRoot?: string;
+    /**
+     * Commit SHA the running code was built from, used to anchor captured line
+     * numbers. Auto-detected from CI/deploy env vars (Vercel/GitHub/Railway/…)
+     * when omitted.
+     */
+    commitSha?: string;
 }
 interface TracePayload {
     /** Wire-format version. Injected by Tracer.ingest — callers never set it. */
@@ -27,6 +40,10 @@ interface TracePayload {
     error?: string;
     span_id?: string;
     parent_span_id?: string;
+    code_filepath?: string;
+    code_lineno?: number;
+    code_function?: string;
+    commit_sha?: string;
 }
 /** Minimal shape we need from a streaming response — the real MessageStream satisfies this. */
 interface MessageStreamLike {
@@ -115,6 +132,10 @@ declare class Tracer {
     private readonly apiUrl;
     private readonly apiKey;
     readonly runId: string;
+    /** Resolved once; used to relativize captured call-site paths. */
+    readonly sourceRoot: string;
+    /** Commit the running code was built from; anchors captured line numbers. */
+    readonly commitSha: string | undefined;
     constructor(config: TraceConfig);
     ingest(payload: TracePayload): Promise<string | null>;
     wrapAnthropic(client: AnthropicClientLike): TracedAnthropic;
@@ -123,4 +144,33 @@ declare class Tracer {
 
 declare function getCost(model: string, inputTokens: number, outputTokens: number): number;
 
-export { type AnthropicClientLike, type MessageStreamLike, type OpenAIClientLike, type TraceConfig, type TraceOptions, type TracePayload, type TracedAnthropic, type TracedMessageParams, type TracedOpenAI, TracedRun, type TracedStreamParams, Tracer, getCost };
+/**
+ * Call-site capture — records WHERE in the user's code a traced LLM call was made
+ * (repo-relative file, line, column, function) so downstream agents (an MCP, a
+ * GitHub PR bot) can jump straight to the source instead of grepping the repo.
+ *
+ * Uses V8's structured stack API (Error.prepareStackTrace + captureStackTrace),
+ * which yields typed CallSite objects — no fragile string parsing. Must be called
+ * SYNCHRONOUSLY at the entry of a wrapper method, before any `await`: after the
+ * first await the caller's frame is gone and only an async reconstruction remains.
+ */
+interface CallSite {
+    /** Repo-relative when a source root is resolvable, else the raw absolute path. */
+    file: string;
+    line: number;
+    column: number;
+    function: string;
+}
+/**
+ * Resolve the repo root to strip off captured paths, most-explicit-wins:
+ * explicit config → env → nearest .git → nearest package marker → cwd.
+ * Called ONCE at Tracer construction.
+ */
+declare function resolveSourceRoot(explicit?: string): {
+    root: string;
+    how: string;
+};
+/** The first stack frame outside the SDK (and node_modules), relativized to `sourceRoot`. */
+declare function captureCallSite(sourceRoot: string): CallSite | null;
+
+export { type AnthropicClientLike, type CallSite, type MessageStreamLike, type OpenAIClientLike, type TraceConfig, type TraceOptions, type TracePayload, type TracedAnthropic, type TracedMessageParams, type TracedOpenAI, TracedRun, type TracedStreamParams, Tracer, captureCallSite, getCost, resolveSourceRoot };

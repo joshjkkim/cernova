@@ -181,6 +181,31 @@ def test_malformed_message_entries_skipped():
     assert [(m.role, m.content) for m in trace.messages] == [("user", "ok")]
 
 
+# ── Call-site provenance ───────────────────────────────────────────────────────
+
+def test_call_site_provenance_flows_through():
+    trace = to_canonical(make_payload(
+        TS_PROMPT,
+        code_filepath="sample-app/chatbot.ts",
+        code_lineno=42,
+        code_function="classifyIntent",
+        commit_sha="deadbeef1234",
+    ))
+    assert trace.code_filepath == "sample-app/chatbot.ts"
+    assert trace.code_lineno == 42
+    assert trace.code_function == "classifyIntent"
+    assert trace.commit_sha == "deadbeef1234"
+
+
+def test_call_site_provenance_absent_is_none():
+    # Older SDKs (pre-0.1.6) don't send these — must default to None, not error.
+    trace = to_canonical(make_payload(TS_PROMPT))
+    assert trace.code_filepath is None
+    assert trace.code_lineno is None
+    assert trace.code_function is None
+    assert trace.commit_sha is None
+
+
 # ── Step-name derivation ───────────────────────────────────────────────────────
 
 def test_derive_step_name_from_system():

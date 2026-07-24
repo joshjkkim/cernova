@@ -24,6 +24,11 @@ class IngestPayload(BaseModel):
     project_id: str | None = None
     span_id: str | None = None
     parent_span_id: str | None = None
+    # Call-site provenance (SDK v0.1.6+). Absent from older SDKs → None.
+    code_filepath: str | None = None
+    code_lineno: int | None = None
+    code_function: str | None = None
+    commit_sha: str | None = None
 
 
 class IngestResponse(BaseModel):

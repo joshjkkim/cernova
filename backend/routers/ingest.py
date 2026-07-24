@@ -367,12 +367,21 @@ def _run_anomaly_detection(payload: CanonicalTrace, project: dict | None, step_p
             _fire_user_sentry_performance(_perf_dsn, payload, result.total_score, result.triggered, project.get("name", "unknown"))
 
         if result.error_map:
-            from schemas.anomaly import AnomalyInput
+            from schemas.anomaly import AnomalyInput, Evidence
+            # error_map stays the source of truth for WHICH codes persist —
+            # contract codes (2010-2012) are folded into it above without ever
+            # producing an EvalHit, so sourcing rows from `hits` would drop them.
+            # Hits only enrich: last-wins, matching error_map's own dedup.
+            evidence = {
+                str(hit.condition_code): Evidence(observed=hit.observed, expected=hit.expected)
+                for hit in result.hits
+            }
             ingest_anomalies(
                 [AnomalyInput(
                     step_name=payload.step_name,
                     run_id=payload.run_id,
                     bad_scores={str(code): int(penalty) for code, penalty in result.error_map.items()},
+                    evidence=evidence,
                 )],
                 project["id"] if project else None,
             )

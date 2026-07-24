@@ -67,6 +67,14 @@ class CanonicalTrace(BaseModel):
     commit_sha: str | None = None      # persisted once CALLS grows provenance columns
     prompt_version: str | None = None  # persisted once CALLS grows provenance columns
 
+    # Call-site provenance — where in the user's code the call was made, so
+    # downstream agents can jump to the source. Captured by the SDKs (stack walk),
+    # mapped from OTel code.* attributes, None for imports. Persisted once CALLS
+    # grows provenance columns.
+    code_filepath: str | None = None   # repo-relative path
+    code_lineno: int | None = None
+    code_function: str | None = None
+
     def kernel(self) -> str:
         """The stable instruction part of the prompt — the step's semantic identity.
 

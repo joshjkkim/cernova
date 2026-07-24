@@ -111,6 +111,30 @@ Stripped before forwarding to Anthropic — the provider never sees it.
 | `status_success` | `true` on success, `false` on thrown error |
 | `output_code` | full text content from response |
 | `error` | error message if the call threw |
+| `code_filepath` / `code_lineno` / `code_function` | call site — see below |
+| `commit_sha` | `CERNOVA_COMMIT_SHA`, `VERCEL_GIT_COMMIT_SHA`, `GITHUB_SHA`, `RAILWAY_GIT_COMMIT_SHA`, or `GIT_COMMIT` |
+
+## Call-site provenance
+
+Wrapped calls record *where in your code* they were made, so an anomaly points at a
+line instead of just a step name:
+
+```json
+{ "code_filepath": "src/workflow.ts", "code_lineno": 256, "code_function": "runWorkflow" }
+```
+
+Paths are relative to your repo root (nearest `.git`); override with `CERNOVA_SOURCE_ROOT`
+or the `sourceRoot` option. Nothing from your source files is transmitted — only the
+path, line, and function name.
+
+> **Running compiled TypeScript?** If you build with `tsc` and run `node dist/app.js`,
+> line numbers refer to the compiled JavaScript. Start your app with `--enable-source-maps`
+> (or `NODE_OPTIONS=--enable-source-maps`) to get real source lines. `sourceMap: true` in
+> tsconfig alone is not enough. Runners that enable source maps for you, like `tsx`, need
+> no change.
+
+The captured frame is the *immediate* caller — if you wrap model calls in a shared
+helper, every call site resolves to that helper. Use `step_name` to tell them apart.
 
 ## Ingest is fire-and-forget
 

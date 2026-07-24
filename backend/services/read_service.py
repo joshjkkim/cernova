@@ -161,6 +161,8 @@ def group_anomalies(rows: list[dict]) -> list[AnomalyRunSummary]:
             code=code,
             name=info.name if info else f"code_{code}",
             penalty=score,
+            observed=row.get("observed"),
+            expected=row.get("expected"),
         ))
 
     for run in runs.values():

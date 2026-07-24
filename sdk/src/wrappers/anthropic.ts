@@ -4,6 +4,7 @@ import type { AnthropicClientLike, MessageStreamLike, TracedMessageParams, Trace
 import { getCost } from '../cost';
 import { TracedRun } from '../run';
 import { getActiveSpanId, runWithSpan } from '../context';
+import { captureCallSite, maybeLogCallSite, callSiteFields } from '../callsite';
 import { uuid } from '../uuid';
 
 export type { AnthropicClientLike, TracedMessageParams };
@@ -38,6 +39,9 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
         const spanId = uuid();
         const parentSpanId = getActiveSpanId();
+        const callSite = captureCallSite(tracer.sourceRoot); // sync, before any await
+        maybeLogCallSite(callSite, stepName);
+        const prov = callSiteFields(callSite, tracer.commitSha);
         const start = Date.now();
 
         try {
@@ -52,6 +56,7 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
           const model         = response.model ?? cleanParams.model;
 
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -74,6 +79,7 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
           const message = err instanceof Error ? err.message : String(err);
 
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -100,6 +106,9 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
         const stepName = _trace?.stepName ?? `step_${currentStep + 1}`;
         const spanId = uuid();
         const parentSpanId = getActiveSpanId();
+        const callSite = captureCallSite(tracer.sourceRoot); // sync, before any await
+        maybeLogCallSite(callSite, stepName);
+        const prov = callSiteFields(callSite, tracer.commitSha);
         const start = Date.now();
 
         if (!client.messages.stream) {
@@ -114,6 +123,7 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
           const total_tokens  = input_tokens + output_tokens;
           const model         = response.model ?? cleanParams.model;
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
@@ -132,6 +142,7 @@ export function wrapAnthropic(client: AnthropicClientLike, tracer: Tracer): Trac
         }).catch((err: unknown) => {
           const latency_ms = Date.now() - start;
           tracer.ingest({
+            ...prov,
             run_id: tracer.runId,
             step_name: stepName,
             step_index: currentStep,
