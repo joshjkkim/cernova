@@ -95,6 +95,7 @@ Traces in from what you already run, alerts out to where you already look.
 | LangSmith import (warm-start baselines from existing traces) | traces in | ✅ live |
 | Generic outbound webhooks (signed events) | alerts out | ✅ live |
 | Read API (`/v1` — pull scored traces & anomalies, paginated) | data out | ✅ live |
+| MCP server (`@cernova/mcp` — query traces from Claude Code & other agents) | data out | ✅ live |
 
 ---
 
