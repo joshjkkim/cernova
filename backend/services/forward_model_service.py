@@ -27,15 +27,24 @@ Otherwise the full user text is used, unchanged. This keeps hops with identical
 ticket text but different flags distinguishable, so correct later-hop routes
 don't fire 5010 as "surprising". Bump FORWARD_INPUT_VERSION when changing the
 extraction so cached fits from the old scheme are never reused.
+
+Multi-hop routers should emit discrete next-hop labels (or JSON next_agent);
+learned contracts own allowlist drift. Retriever 5010 only scores discrete
+outputs (doc ids / short labels) — prose search queries are skipped.
+Fits use a 14-day reference window (capped) so prompt/agent churn does not
+poison the Ridge map. Pipeline-state calls are fitted per stage (flag signature)
+so hop1 and hop2 never share one Ridge map.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import numpy as np
 
@@ -45,14 +54,16 @@ from db import get_client
 log = logging.getLogger(__name__)
 
 MIN_SAMPLES   = 20
-HISTORY_LIMIT = 200
+MIN_SAMPLES_RETRIEVER = 40
+HISTORY_LIMIT = 200                 # kept for callers; fits use FORWARD_HISTORY_LIMIT
+FORWARD_HISTORY_LIMIT = 100
+FORWARD_WINDOW_DAYS = 14
 FIT_TTL_SEC   = 6 * 3600
 RIDGE_ALPHA   = 1.0
 FIT_ROLES     = {"router", "retriever", "extractor"}
 
-# Version of the _forward_input_text extraction scheme. Part of the cache key:
-# a fit learned under one extraction must never score inputs from another.
-FORWARD_INPUT_VERSION = 2
+# Version of the extraction + sampling + stage-key scheme. Part of the cache key.
+FORWARD_INPUT_VERSION = 4
 
 # Keys whose presence marks a user message as pipeline-state JSON.
 _STATE_KEY_HINTS = {"classified", "retrieved", "drafted", "reviewed",
@@ -62,6 +73,9 @@ _STATE_DROP_KEYS = {"ticket_excerpt"}
 # Any other string value longer than this is treated as free text and dropped.
 _STATE_MAX_STR_LEN = 120
 
+# Retriever outputs: only single-token / id-like strings count as discrete.
+_DISCRETE_MAX_LEN = 64
+
 
 @dataclass
 class FittedModel:
@@ -70,6 +84,7 @@ class FittedModel:
     stat: MetricStat | None      # out-of-fold surprise distribution (the fence)
     fitted_at: float
     n: int
+    role: str | None = None      # step role at fit time (for score-time gates)
 
 
 _cache: dict[str, FittedModel] = {}
@@ -146,7 +161,44 @@ def _forward_input_text(raw_prompt: str | None) -> str:
         rep = _state_value_repr(state[k])
         if rep is not None:
             parts.append(f"{k}={rep}")
-    return " ".join(parts) if parts else text
+    # Empty parts: do NOT fall back to full text (would re-include ticket_excerpt).
+    return " ".join(parts) if parts else ""
+
+
+def _is_discrete_decision_output(text: str | None) -> bool:
+    """True for short single-token / id-like outputs (doc ids, route labels).
+
+    Used to gate retriever 5010: any multi-word string is treated as a prose
+    search query and skipped.
+    """
+    if not text or not str(text).strip():
+        return False
+    s = " ".join(str(text).split())
+    if len(s) > _DISCRETE_MAX_LEN:
+        return False
+    # Multi-word → prose query (not a discrete decision).
+    if " " in s:
+        return False
+    return True
+
+
+def _stage_key(raw_prompt: str | None) -> str | None:
+    """Hop/stage id from pipeline-state flags, or None for plain prompts.
+
+    Same flag serialization as `_forward_input_text`, hashed for a compact
+    cache/fit key so different hops never share one Ridge map.
+    """
+    text = _user_text(raw_prompt)
+    if not text or _parse_pipeline_state(text) is None:
+        return None
+    flags = _forward_input_text(raw_prompt)
+    if not flags:
+        return "empty"
+    return hashlib.sha1(flags.encode("utf-8")).hexdigest()[:12]
+
+
+def _min_samples_for(role: str | None) -> int:
+    return MIN_SAMPLES_RETRIEVER if role == "retriever" else MIN_SAMPLES
 
 
 def _unit(m: np.ndarray) -> np.ndarray:
@@ -176,37 +228,56 @@ def _surprise_stat(values: list[float]) -> MetricStat:
                       calibration=s)
 
 
-def _skip(reason: str, profile_id: str, n: int = 0) -> FittedModel:
+def _skip(reason: str, profile_id: str, n: int = 0, role: str | None = None) -> FittedModel:
     log.info(f"[forward-model] skip profile={profile_id}: {reason}")
-    return FittedModel(coef=None, intercept=None, stat=None, fitted_at=time.time(), n=n)
+    return FittedModel(coef=None, intercept=None, stat=None, fitted_at=time.time(),
+                       n=n, role=role)
 
 
-def _fit(step_profile_id: str) -> FittedModel:
+def _fit(step_profile_id: str, stage: str | None = None) -> FittedModel:
     """Fit the profile's forward model from clean history. Mirrors the baseline
-    hardening rules: successful, non-anomalous calls after the last evolution."""
+    hardening rules: successful, non-anomalous calls after the last evolution,
+    within a recent reference window, scoped to one pipeline stage when set."""
     db = get_client()
 
     prof = (db.table("step_profiles").select("role,last_evolved_at")
             .eq("id", step_profile_id).single().execute()).data or {}
     role = prof.get("role")
     if role not in FIT_ROLES:
-        return _skip(f"role={role} not gated in", step_profile_id)
+        return _skip(f"role={role} not gated in", step_profile_id, role=role)
 
     q = (db.table("CALLS").select("prompt,output_code")
          .eq("step_profile_id", step_profile_id)
          .eq("status_success", True)
          .or_("anomaly_triggered.is.null,anomaly_triggered.eq.false")
          .order("created_at", desc=True)
-         .limit(HISTORY_LIMIT))
-    if prof.get("last_evolved_at"):
-        q = q.gte("created_at", prof["last_evolved_at"])
+         .limit(FORWARD_HISTORY_LIMIT))
+    # Reference window: max(last_evolved_at, now - FORWARD_WINDOW_DAYS).
+    window_start = (datetime.now(timezone.utc) - timedelta(days=FORWARD_WINDOW_DAYS)).isoformat()
+    evolved = prof.get("last_evolved_at")
+    if evolved and str(evolved) > window_start:
+        q = q.gte("created_at", evolved)
+    else:
+        q = q.gte("created_at", window_start)
     rows = q.execute().data or []
 
-    pairs = [( _forward_input_text(r.get("prompt")), r.get("output_code") )
-             for r in rows]
-    pairs = [(i, o) for i, o in pairs if i.strip() and o]
-    if len(pairs) < MIN_SAMPLES:
-        return _skip(f"n={len(pairs)} < {MIN_SAMPLES}", step_profile_id, n=len(pairs))
+    pairs = []
+    for r in rows:
+        prompt = r.get("prompt")
+        if _stage_key(prompt) != stage:
+            continue
+        inp = _forward_input_text(prompt)
+        out = r.get("output_code")
+        if not (inp and str(inp).strip() and out):
+            continue
+        if role == "retriever" and not _is_discrete_decision_output(out):
+            continue
+        pairs.append((inp, out))
+
+    min_n = _min_samples_for(role)
+    if len(pairs) < min_n:
+        return _skip(f"n={len(pairs)} < {min_n}", step_profile_id,
+                     n=len(pairs), role=role)
 
     from sklearn.linear_model import Ridge
     from sklearn.model_selection import KFold
@@ -225,18 +296,22 @@ def _fit(step_profile_id: str) -> FittedModel:
 
     final = Ridge(alpha=RIDGE_ALPHA).fit(X, Y)
     fm = FittedModel(coef=final.coef_, intercept=final.intercept_,
-                     stat=_surprise_stat(list(oof)), fitted_at=time.time(), n=len(pairs))
-    log.info(f"[forward-model] fitted profile={step_profile_id} role={role} n={fm.n} "
+                     stat=_surprise_stat(list(oof)), fitted_at=time.time(),
+                     n=len(pairs), role=role)
+    log.info(f"[forward-model] fitted profile={step_profile_id} role={role} "
+             f"stage={stage} n={fm.n} "
              f"surprise q1={fm.stat.q1:.3f} q3={fm.stat.q3:.3f}")
     return fm
 
 
-def _cache_key(step_profile_id: str) -> str:
-    return f"{step_profile_id}:v{FORWARD_INPUT_VERSION}"
+def _cache_key(step_profile_id: str, stage: str | None = None) -> str:
+    base = f"{step_profile_id}:v{FORWARD_INPUT_VERSION}"
+    return f"{base}:stage={stage}" if stage else base
 
 
-def _get_model(step_profile_id: str) -> FittedModel:
-    key = _cache_key(step_profile_id)
+def _get_model(step_profile_id: str, raw_prompt: str | None = None) -> FittedModel:
+    stage = _stage_key(raw_prompt)
+    key = _cache_key(step_profile_id, stage)
     fm = _cache.get(key)
     if fm and time.time() - fm.fitted_at < FIT_TTL_SEC:
         return fm
@@ -244,7 +319,7 @@ def _get_model(step_profile_id: str) -> FittedModel:
         fm = _cache.get(key)                      # double-checked: another thread may have fitted
         if fm and time.time() - fm.fitted_at < FIT_TTL_SEC:
             return fm
-        fm = _fit(step_profile_id)
+        fm = _fit(step_profile_id, stage=stage)
         _cache[key] = fm
         return fm
 
@@ -260,8 +335,10 @@ def score_surprise(step_profile_id: str, raw_prompt: str | None,
         inp = _forward_input_text(raw_prompt)
         if not inp.strip() or not output_text:
             return None
-        fm = _get_model(step_profile_id)
+        fm = _get_model(step_profile_id, raw_prompt)
         if fm.coef is None or fm.stat is None:
+            return None
+        if fm.role == "retriever" and not _is_discrete_decision_output(output_text):
             return None
 
         from services.fingerprinter import _embed

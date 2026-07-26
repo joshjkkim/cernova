@@ -130,6 +130,29 @@ def test_fit_skips_thin_history():
     assert fm.coef is None and fm.n == 5
 
 
+def test_fit_skips_prose_only_retriever():
+    fms._cache.clear()
+    rows = [{
+        "prompt": '{"messages":[{"role":"user","content":"find refund docs"}]}',
+        "output_code": "refund policy duplicate charge search query text",
+    }] * 50
+    with patch(f"{MOD}.get_client", return_value=FakeDB("retriever", rows)):
+        fm = fms._get_model("p-prose")
+    assert fm.coef is None and fm.n == 0
+
+
+def test_fit_retriever_needs_higher_sample_floor():
+    fms._cache.clear()
+    # 25 discrete samples — enough for router MIN_SAMPLES, not for retriever.
+    rows = [{
+        "prompt": '{"messages":[{"role":"user","content":"q"}]}',
+        "output_code": "kb:doc",
+    }] * 25
+    with patch(f"{MOD}.get_client", return_value=FakeDB("retriever", rows)):
+        fm = fms._get_model("p-ret-thin")
+    assert fm.coef is None and fm.n == 25
+
+
 def test_cache_hit_avoids_refit():
     fms._cache.clear()
     with patch(f"{MOD}._fit", return_value=_identity_model()) as fit:
@@ -151,6 +174,24 @@ def test_ttl_expiry_refits():
 def test_cache_key_carries_input_version():
     # Fits from an older extraction scheme must never be reused.
     assert f"v{fms.FORWARD_INPUT_VERSION}" in fms._cache_key("p1")
+
+
+def test_cache_key_includes_stage_when_set():
+    assert "stage=abc" in fms._cache_key("p1", "abc")
+    assert "stage=" not in fms._cache_key("p1")
+
+
+def test_stage_key_differs_across_hops():
+    hop1 = state_prompt(TICKET_A, classified=False, retrieved=False, drafted=False)
+    hop2 = state_prompt(TICKET_A, classified=True, category="billing",
+                        retrieved=False, drafted=False)
+    assert fms._stage_key(hop1) != fms._stage_key(hop2)
+    assert fms._stage_key(hop1) is not None
+
+
+def test_stage_key_none_for_plain_prompt():
+    raw = json.dumps({"messages": [{"role": "user", "content": "hello"}]})
+    assert fms._stage_key(raw) is None
 
 
 # --- forward-model input extraction (pipeline state vs plain prompts) ----------
@@ -198,6 +239,13 @@ def test_long_string_values_dropped_short_kept():
     assert "category=billing" in out
 
 
+def test_state_with_only_ticket_returns_empty():
+    # Detected as pipeline state but nothing left to serialize — do not fall
+    # back to full text (would re-include ticket_excerpt).
+    raw = state_prompt(TICKET_A)
+    assert fms._forward_input_text(raw) == ""
+
+
 def test_non_state_prompt_unchanged():
     raw = json.dumps({"messages": [
         {"role": "user", "content": "Classify as billing or support:  I need\nhelp with my bill"}]})
@@ -209,6 +257,29 @@ def test_non_state_json_prompt_unchanged():
     raw = json.dumps({"messages": [
         {"role": "user", "content": '{"name": "maya", "plan": "pro"}'}]})
     assert fms._forward_input_text(raw) == '{"name": "maya", "plan": "pro"}'
+
+
+# --- discrete retriever gate ----------------------------------------------------
+
+def test_discrete_decision_output_helper():
+    assert fms._is_discrete_decision_output("kb:refund-policy")
+    assert fms._is_discrete_decision_output("billing")
+    assert not fms._is_discrete_decision_output("team pricing")
+    assert not fms._is_discrete_decision_output(
+        "refund policy duplicate charge Pro plan for billing errors")
+    assert not fms._is_discrete_decision_output("")
+
+
+def test_score_skips_prose_retriever_output():
+    model = _identity_model()
+    model.role = "retriever"
+    with patch(f"{MOD}._get_model", return_value=model), \
+         patch("services.fingerprinter._embed", return_value=[1.0, 0.0, 0.0, 0.0]):
+        assert fms.score_surprise(
+            "p1",
+            '{"messages":[{"role":"user","content":"in"}]}',
+            "refund policy duplicate charge Pro plan for billing",
+        ) is None
 
 
 # --- registry sanity ------------------------------------------------------------
