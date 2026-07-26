@@ -18,6 +18,15 @@ surprise is optional evidence and must never break ingest.
 Role-gated: only fitted for decision-type roles (router/retriever/extractor)
 where the prototype proved discrimination. Free-text steps (generator/creative)
 are owned by L2 semantic entropy; label steps by learned contracts.
+
+Forward-model input prefers structured state when present: if the user message
+carries pipeline-state JSON (multi-hop supervisors that re-send the same ticket
+text every hop with only decision flags changing), the embedded input is a
+deterministic serialization of those flags with long free-text fields dropped.
+Otherwise the full user text is used, unchanged. This keeps hops with identical
+ticket text but different flags distinguishable, so correct later-hop routes
+don't fire 5010 as "surprising". Bump FORWARD_INPUT_VERSION when changing the
+extraction so cached fits from the old scheme are never reused.
 """
 
 from __future__ import annotations
@@ -40,6 +49,18 @@ HISTORY_LIMIT = 200
 FIT_TTL_SEC   = 6 * 3600
 RIDGE_ALPHA   = 1.0
 FIT_ROLES     = {"router", "retriever", "extractor"}
+
+# Version of the _forward_input_text extraction scheme. Part of the cache key:
+# a fit learned under one extraction must never score inputs from another.
+FORWARD_INPUT_VERSION = 2
+
+# Keys whose presence marks a user message as pipeline-state JSON.
+_STATE_KEY_HINTS = {"classified", "retrieved", "drafted", "reviewed",
+                    "next_agent", "ticket_excerpt", "kb_articles_found"}
+# Free-text blobs always excluded from the state serialization.
+_STATE_DROP_KEYS = {"ticket_excerpt"}
+# Any other string value longer than this is treated as free text and dropped.
+_STATE_MAX_STR_LEN = 120
 
 
 @dataclass
@@ -69,6 +90,63 @@ def _user_text(raw_prompt: str | None) -> str:
     except Exception:
         pass
     return " ".join(raw_prompt.split())
+
+
+def _parse_pipeline_state(text: str) -> dict | None:
+    """The user message as a pipeline-state dict, or None if it isn't one.
+
+    Tolerates a prose prefix ("Pipeline state:\\n{...}") by parsing the outermost
+    {...} span. Only dicts carrying known state keys qualify — plain prompts and
+    unrelated JSON fall through to the full-text path.
+    """
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        obj = json.loads(text[start:end + 1])
+    except Exception:
+        return None
+    if not isinstance(obj, dict) or not (_STATE_KEY_HINTS & obj.keys()):
+        return None
+    return obj
+
+
+def _state_value_repr(v) -> str | None:
+    """Compact deterministic value repr; None = drop this key (free text)."""
+    if v is None:
+        return "null"
+    if isinstance(v, bool):
+        return "true" if v else "false"
+    if isinstance(v, str):
+        return v if len(v) <= _STATE_MAX_STR_LEN else None
+    if isinstance(v, (int, float)):
+        return json.dumps(v)
+    s = json.dumps(v, sort_keys=True, separators=(",", ":"))
+    return s if len(s) <= _STATE_MAX_STR_LEN else None
+
+
+def _forward_input_text(raw_prompt: str | None) -> str:
+    """The string embedded as the forward model's input — shared by fit and
+    score so both sides see identical features.
+
+    Pipeline-state messages become sorted `key=value` pairs with free-text
+    blobs dropped: two hops over the same ticket but different flags now embed
+    differently, and two tickets in the same state embed identically. Anything
+    else is the whitespace-normalized user text, exactly as before.
+    """
+    text = _user_text(raw_prompt)
+    state = _parse_pipeline_state(text) if text else None
+    if state is None:
+        return text
+    parts = []
+    for k in sorted(state):
+        if k in _STATE_DROP_KEYS:
+            continue
+        rep = _state_value_repr(state[k])
+        if rep is not None:
+            parts.append(f"{k}={rep}")
+    return " ".join(parts) if parts else text
 
 
 def _unit(m: np.ndarray) -> np.ndarray:
@@ -124,7 +202,7 @@ def _fit(step_profile_id: str) -> FittedModel:
         q = q.gte("created_at", prof["last_evolved_at"])
     rows = q.execute().data or []
 
-    pairs = [( _user_text(r.get("prompt")), r.get("output_code") )
+    pairs = [( _forward_input_text(r.get("prompt")), r.get("output_code") )
              for r in rows]
     pairs = [(i, o) for i, o in pairs if i.strip() and o]
     if len(pairs) < MIN_SAMPLES:
@@ -153,16 +231,21 @@ def _fit(step_profile_id: str) -> FittedModel:
     return fm
 
 
+def _cache_key(step_profile_id: str) -> str:
+    return f"{step_profile_id}:v{FORWARD_INPUT_VERSION}"
+
+
 def _get_model(step_profile_id: str) -> FittedModel:
-    fm = _cache.get(step_profile_id)
+    key = _cache_key(step_profile_id)
+    fm = _cache.get(key)
     if fm and time.time() - fm.fitted_at < FIT_TTL_SEC:
         return fm
     with _fit_lock:
-        fm = _cache.get(step_profile_id)          # double-checked: another thread may have fitted
+        fm = _cache.get(key)                      # double-checked: another thread may have fitted
         if fm and time.time() - fm.fitted_at < FIT_TTL_SEC:
             return fm
         fm = _fit(step_profile_id)
-        _cache[step_profile_id] = fm
+        _cache[key] = fm
         return fm
 
 
@@ -174,7 +257,7 @@ def score_surprise(step_profile_id: str, raw_prompt: str | None,
     output, or any failure) — the caller simply doesn't score 5010.
     """
     try:
-        inp = _user_text(raw_prompt)
+        inp = _forward_input_text(raw_prompt)
         if not inp.strip() or not output_text:
             return None
         fm = _get_model(step_profile_id)

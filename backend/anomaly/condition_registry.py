@@ -208,6 +208,8 @@ _STATISTICAL: list[ConditionDef] = [
     # surprise = 1 - cos(g(embed(input)), embed(output)) against the step's own
     # learned input->output map (services/forward_model_service). Fires when the
     # output is semantically unlike what this step produces for this input.
+    # For pipeline-state prompts, "this input" is the serialized decision flags
+    # (not shared free text like ticket_excerpt) — see forward_model_service.
     ConditionDef(
         5010, "statistical_baseline", "semantic_surprise_fence", 40.0,
         "Output is semantically unlike what this step normally produces for this input "

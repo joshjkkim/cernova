@@ -9,6 +9,8 @@ TTL caching, and safe degradation. DB and embedder are faked — no model load.
 
 from __future__ import annotations
 
+import json
+
 import numpy as np
 from unittest.mock import patch
 
@@ -140,10 +142,73 @@ def test_ttl_expiry_refits():
     fms._cache.clear()
     stale = _identity_model()
     stale.fitted_at = fms.time.time() - fms.FIT_TTL_SEC - 1
-    fms._cache["p1"] = stale
+    fms._cache[fms._cache_key("p1")] = stale
     with patch(f"{MOD}._fit", return_value=_identity_model()) as fit:
         fms._get_model("p1")
     assert fit.call_count == 1
+
+
+def test_cache_key_carries_input_version():
+    # Fits from an older extraction scheme must never be reused.
+    assert f"v{fms.FORWARD_INPUT_VERSION}" in fms._cache_key("p1")
+
+
+# --- forward-model input extraction (pipeline state vs plain prompts) ----------
+
+TICKET_A = ("Hi, I was charged twice for my Pro plan this month. My email is "
+            "maya@brightloop.io — can you refund the duplicate charge? This is pretty urgent.")
+TICKET_B = ("Hello, my export keeps failing with a 500 error whenever I include "
+            "attachments. Started yesterday. Could someone take a look at the job logs please?")
+
+
+def state_prompt(excerpt, **flags) -> str:
+    content = "Pipeline state:\n" + json.dumps({"ticket_excerpt": excerpt, **flags})
+    return json.dumps({"messages": [{"role": "user", "content": content}]})
+
+
+def test_same_excerpt_different_flags_diverge():
+    hop2 = fms._forward_input_text(state_prompt(
+        TICKET_A, classified=True, category="billing", retrieved=False, drafted=False))
+    hop3 = fms._forward_input_text(state_prompt(
+        TICKET_A, classified=True, category="billing", retrieved=True, drafted=False))
+    assert hop2 != hop3
+    assert "retrieved=false" in hop2 and "retrieved=true" in hop3
+
+
+def test_different_excerpt_same_flags_match():
+    flags = dict(classified=True, category="billing", retrieved=False, drafted=False)
+    a = fms._forward_input_text(state_prompt(TICKET_A, **flags))
+    b = fms._forward_input_text(state_prompt(TICKET_B, **flags))
+    assert a == b
+    assert "ticket_excerpt" not in a and TICKET_A not in a
+
+
+def test_state_serialization_is_sorted_and_typed():
+    out = fms._forward_input_text(state_prompt(
+        TICKET_A, retrieved=False, classified=True,
+        classification_confidence=0.95, category=None, kb_articles_found=0))
+    assert out == ("category=null classification_confidence=0.95 classified=true "
+                   "kb_articles_found=0 retrieved=false")
+
+
+def test_long_string_values_dropped_short_kept():
+    out = fms._forward_input_text(state_prompt(
+        TICKET_A, classified=True, note="x" * 200, category="billing"))
+    assert "note=" not in out
+    assert "category=billing" in out
+
+
+def test_non_state_prompt_unchanged():
+    raw = json.dumps({"messages": [
+        {"role": "user", "content": "Classify as billing or support:  I need\nhelp with my bill"}]})
+    assert fms._forward_input_text(raw) == "Classify as billing or support: I need help with my bill"
+
+
+def test_non_state_json_prompt_unchanged():
+    # JSON without pipeline-state keys must not be rewritten.
+    raw = json.dumps({"messages": [
+        {"role": "user", "content": '{"name": "maya", "plan": "pro"}'}]})
+    assert fms._forward_input_text(raw) == '{"name": "maya", "plan": "pro"}'
 
 
 # --- registry sanity ------------------------------------------------------------
