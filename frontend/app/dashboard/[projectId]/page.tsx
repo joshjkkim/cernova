@@ -175,6 +175,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
   const [contracts, setContracts]         = useState<ContractRow[]>([]);
   const [incidents, setIncidents]         = useState<Incident[]>([]);
   const [tourStep, setTourStep]           = useState<number | null>(null);
+  const [loaded, setLoaded]               = useState(false); // initial data batch in — gates first paint
 
   const hasData  = calls.length > 0;
   // Demo mode: while the tour runs on an empty project, render a sample dataset so
@@ -238,6 +239,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
       if (registryRes.ok) setConditionRegistry(await registryRes.json() as ConditionRegistry);
       if (healthRes.ok) setStepHealth(await healthRes.json() as StepHealthRow[]);
       if (incidentsRes.ok) setIncidents(await incidentsRes.json() as Incident[]);
+      setLoaded(true); // data (incl. calls) is in — safe to decide FirstRun vs. content without a flash
 
       // Contracts are API-key authed (same endpoint the SDK/CLI uses).
       const contractsRes = await fetch(`${BACKEND}/contracts`, {
@@ -291,7 +293,7 @@ export default function ProjectPage({ params }: { params: Promise<{ projectId: s
     );
   }
 
-  if (!project) {
+  if (!project || !loaded) {
     return (
       <main className="min-h-screen bg-[#201a2b] text-[#e9e4f0] flex items-center justify-center">
         <p className="font-mono text-xs text-[#7c7291]">loading…</p>
