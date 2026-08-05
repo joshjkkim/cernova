@@ -76,6 +76,22 @@ observing ──(≥ MIN_SAMPLES)──▶ proposed ──(user confirms)──�
   time-series; Pillar 2 trends it — contract-pass-rate over time *is* the cheap
   first layer of drift.
 
+## Multi-hop supervisors (routers)
+
+Supervisor / orchestrator steps are classified as **`router`**. For contracts and
+the forward-model (5010) to agree:
+
+- Emit a **discrete** next-hop label (`classifier`, `retriever`, …) or JSON with a
+  stable `next_agent` (or equivalent) key whose domain stays small (≤
+  `ENUM_MAX_DOMAIN`).
+- Prefer short enum strings over freeform routing prose so `learn_contract` can
+  induce `enum_values` and 5010 can learn flag→route maps cleanly.
+- Pipeline-state prompts that re-send the same ticket text should keep decision
+  flags in JSON; the forward model embeds those flags (not `ticket_excerpt`).
+
+Wrong `next_agent` is then catchable by an **enforced** contract enum and/or
+semantic surprise once history exists.
+
 ## Tuning knobs (`contract_learner.py`)
 
 `MIN_SAMPLES=20`, `JSON_FORMAT_THRESHOLD=0.90`, `REQUIRED_THRESHOLD=0.98`,
