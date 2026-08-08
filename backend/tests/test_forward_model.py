@@ -113,10 +113,73 @@ class FakeDB:
         return Q()
 
 
-def test_fit_skips_ungated_role():
+DIM = 32
+_slots: dict[str, int] = {}
+
+
+def _vec(token: str) -> list[float]:
+    """Orthogonal embedding per distinct token, so a fake corpus has real geometry.
+
+    Slots are assigned in first-seen order — NOT hash-derived, which would vary
+    per process (PYTHONHASHSEED) and make the geometry flaky between runs.
+    """
+    v = np.zeros(DIM)
+    v[_slots.setdefault(token, len(_slots) % DIM)] = 1.0
+    return list(v)
+
+
+def _corpus(outputs) -> list[dict]:
+    """24 calls cycling 8 distinct inputs; `outputs` maps call index -> output token."""
+    return [{"prompt": '{"messages":[{"role":"user","content":"q%d"}]}' % (i % 8),
+             "output_code": outputs(i)} for i in range(24)]
+
+
+def _fit_with(rows, role="router"):
     fms._cache.clear()
-    with patch(f"{MOD}.get_client", return_value=FakeDB("generator", [])):
-        fm = fms._get_model("p-gen")
+    with patch(f"{MOD}.get_client", return_value=FakeDB(role, rows)), \
+         patch("services.fingerprinter._embed", side_effect=_vec):
+        return fms._get_model("p-x")
+
+
+def test_fit_keeps_a_model_that_discriminates():
+    # output is a clean function of input -> the true output always beats a decoy.
+    fm = _fit_with(_corpus(lambda i: f"a{i % 8}"))
+    assert fm.coef is not None
+    assert fm.discrimination is not None and fm.discrimination >= fms.MIN_DECOY_WIN
+
+
+def test_fit_skips_a_model_without_power():
+    # same input -> arbitrary unrelated output: nothing to learn, so no fence.
+    fm = _fit_with(_corpus(lambda i: f"a{(i * 5 + 3) % 8}" if i % 2 else f"b{i % 7}"))
+    assert fm.coef is None and fm.stat is None
+
+
+def test_role_no_longer_gates():
+    # 'generator' was excluded outright before; now only measured power decides.
+    fm = _fit_with(_corpus(lambda i: f"a{i % 8}"), role="generator")
+    assert fm.coef is not None
+
+
+def test_declined_role_still_fits():
+    fm = _fit_with(_corpus(lambda i: f"a{i % 8}"), role=None)
+    assert fm.coef is not None
+
+
+def test_identical_outputs_are_ties_not_wins():
+    # Every decoy IS the true output. Those comparisons are undecidable — and
+    # resolvable only to float noise, so counting them made the win rate depend
+    # on BLAS summation order. They must be excluded, leaving nothing to measure.
+    X = np.eye(24)[:, :DIM] if DIM >= 24 else np.eye(24)
+    Y = np.tile(np.eye(DIM)[0], (24, 1))          # one identical output, 24 times
+    _, wins, trials = fms._cross_validate(X, Y)
+    assert (wins, trials) == (0, 0)
+
+
+def test_fit_skips_when_decoys_unmeasurable():
+    # every input identical -> no dissimilar-input decoys exist -> can't claim power.
+    rows = [{"prompt": '{"messages":[{"role":"user","content":"same"}]}',
+             "output_code": f"a{i}"} for i in range(24)]
+    fm = _fit_with(rows)
     assert fm.coef is None
 
 

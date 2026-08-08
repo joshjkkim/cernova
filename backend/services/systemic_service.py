@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 WINDOW_MIN   = 10     # look-back window for the distinct-run count
 MIN_RUNS     = 5      # distinct runs firing the same (step, code) to be an incident
 COOLDOWN_MIN = 10     # don't re-alert an open incident more than once per this
+RESOLVE_GRACE_MIN = 5 # quiet time past the window before an incident is closed
 _SCAN_CAP    = 2000   # bound the window fetch (like read/trend services)
 
 
@@ -43,8 +44,51 @@ def _parse(ts: str | None) -> dt.datetime | None:
         return None
 
 
+def _is_stale(row: dict, now: dt.datetime) -> bool:
+    """Has this open incident's failure stopped?
+
+    `updated_at` is refreshed on every check while the (step, code) is still
+    above min_runs, so a frozen `updated_at` means the incident stopped being
+    systemic. We wait for its own window to fully roll off — the anomalies that
+    supported it have aged out by then — plus a grace so a lull in traffic
+    doesn't close a live incident.
+
+    An undated row is never stale: we don't close what we can't date.
+    """
+    updated = _parse(row.get("updated_at"))
+    if not updated:
+        return False
+    window = row.get("window_min") or WINDOW_MIN
+    return now > updated + dt.timedelta(minutes=window + RESOLVE_GRACE_MIN)
+
+
+def _resolve(db, ids: list[int], now: dt.datetime) -> None:
+    """Close incidents whose failure has stopped. Best-effort — never raises."""
+    if not ids:
+        return
+    try:
+        db.table("incidents").update(
+            {"status": "resolved", "resolved_at": _iso(now), "updated_at": _iso(now)}
+        ).in_("id", ids).execute()
+        log.info(f"[systemic] RESOLVED incidents={ids}")
+    except Exception:
+        # `resolved_at` may not exist yet (migration not run). `status` is what
+        # the dashboard filters on, so close them regardless.
+        try:
+            db.table("incidents").update({"status": "resolved"}).in_("id", ids).execute()
+            log.warning(f"[systemic] resolved incidents={ids} without resolved_at "
+                        f"(run migrations/add_incident_resolution.sql)")
+        except Exception:
+            log.error(f"[systemic] resolve failed incidents={ids}", exc_info=True)
+
+
 def list_incidents(project_id: str, limit: int = 100) -> list[dict]:
     """Recent incidents for a project, newest first — for the dashboard read path.
+
+    Sweeps stale open incidents to 'resolved' on the way out. There is no
+    scheduler in this deployment, and the read path is both the only reliable
+    tick and the exact moment the answer has to be true — the dashboard filters
+    on status, so an incident left open is an incident shown as ongoing.
 
     Returns raw rows (defensive: empty list if the table doesn't exist yet).
     """
@@ -58,10 +102,24 @@ def list_incidents(project_id: str, limit: int = 100) -> list[dict]:
             .limit(limit)
             .execute()
         )
-        return res.data or []
+        rows = res.data or []
     except Exception:
         log.error(f"[systemic] list_incidents failed project={project_id}", exc_info=True)
         return []
+
+    try:
+        now = _now()
+        stale = [r["id"] for r in rows if r.get("status") == "open" and _is_stale(r, now)]
+        if stale:
+            _resolve(get_client(), stale, now)
+            done = set(stale)
+            for r in rows:
+                if r.get("id") in done:
+                    r["status"], r["resolved_at"] = "resolved", _iso(now)
+    except Exception:
+        log.error(f"[systemic] resolve sweep failed project={project_id}", exc_info=True)
+
+    return rows
 
 
 def _distinct_run_count(db, project_id: str, step_name: str, error_code: int, since_iso: str) -> int:
@@ -115,8 +173,15 @@ def maybe_open_incident(
             .execute()
         ).data
 
-        if existing:
-            row = existing[0]
+        row = existing[0] if existing else None
+        if row and _is_stale(row, now):
+            # The earlier episode ended and this is a fresh outbreak. Close the
+            # old incident so the recurrence opens (and alerts as) a new one
+            # rather than silently re-alerting a row opened days ago.
+            _resolve(db, [row["id"]], now)
+            row = None
+
+        if row:
             updates: dict = {"run_count": count, "updated_at": _iso(now)}
             last_alerted = _parse(row.get("last_alerted_at"))
             if last_alerted and last_alerted >= now - dt.timedelta(minutes=COOLDOWN_MIN):

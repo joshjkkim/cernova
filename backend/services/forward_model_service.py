@@ -15,9 +15,19 @@ background thread — a 1-2s first fit per profile after a deploy is acceptable
 there and never touches the ingest hot path. Every failure path returns None:
 surprise is optional evidence and must never break ingest.
 
-Role-gated: only fitted for decision-type roles (router/retriever/extractor)
-where the prototype proved discrimination. Free-text steps (generator/creative)
-are owned by L2 semantic entropy; label steps by learned contracts.
+GATED ON MEASURED DISCRIMINATION, not on the step's role. At fit time we ask the
+model the question we actually care about: out-of-fold, does it score the true
+output as less surprising than a same-step output drawn from a *dissimilar*
+input? Below MIN_DECOY_WIN we keep the model unfitted rather than ship a fence
+with no power. This needs no labels — the decoys come from the step's own
+history — and it costs nothing extra, since it reuses the embeddings and the
+folds the fence is already built from.
+
+Role was the previous gate and measured badly in both directions on real data
+(research/gate_diagnostics.py): profiles the classifier declined (role NULL)
+included some of the most predictable steps, while a confidently-labelled
+'router' was fitted at 57% discrimination — a coin flip. Role stays in the fit
+log for correlation, but it no longer decides anything here.
 """
 
 from __future__ import annotations
@@ -39,7 +49,11 @@ MIN_SAMPLES   = 20
 HISTORY_LIMIT = 200
 FIT_TTL_SEC   = 6 * 3600
 RIDGE_ALPHA   = 1.0
-FIT_ROLES     = {"router", "retriever", "extractor"}
+
+DECOY_SIM_CAP    = 0.90   # a decoy's source input must be LESS similar than this
+MIN_DECOY_TRIALS = 20     # too few comparisons to measure power -> don't claim it
+MIN_DECOY_WIN    = 0.70   # measured out-of-fold discrimination required to fit
+TIE_EPS          = 1e-9   # below this the two outputs are the same answer, not a test
 
 
 @dataclass
@@ -49,6 +63,7 @@ class FittedModel:
     stat: MetricStat | None      # out-of-fold surprise distribution (the fence)
     fitted_at: float
     n: int
+    discrimination: float | None = None   # measured out-of-fold decoy win rate
 
 
 _cache: dict[str, FittedModel] = {}
@@ -103,6 +118,42 @@ def _skip(reason: str, profile_id: str, n: int = 0) -> FittedModel:
     return FittedModel(coef=None, intercept=None, stat=None, fitted_at=time.time(), n=n)
 
 
+def _cross_validate(X: np.ndarray, Y: np.ndarray) -> tuple[np.ndarray, int, int]:
+    """One out-of-fold pass yielding both things we need from it.
+
+    Returns (surprise per call, decoy wins, decoy trials). A "decoy" is another
+    call's output from this same step whose input was dissimilar to this one —
+    i.e. a fluent, shape-correct, WRONG answer. A model with real power scores
+    the true output as the less surprising of the two.
+
+    TIES ARE EXCLUDED, not counted. A step that emits the same answer for many
+    different inputs (a router that always picks one agent) supplies decoys that
+    are *identical* to the true output; those comparisons are undecidable rather
+    than passed or failed, and their exact-equality is only resolvable to float
+    noise, so counting them would make the gate depend on BLAS summation order.
+    Excluding them means a step whose outputs don't vary with its inputs runs out
+    of measurable trials — which is the correct conclusion for a model whose only
+    claim is that the output depends on the input.
+    """
+    from sklearn.linear_model import Ridge
+    from sklearn.model_selection import KFold
+
+    oof = np.zeros(len(X))
+    wins = trials = 0
+    for tr, te in KFold(n_splits=5, shuffle=True, random_state=0).split(X):
+        m = Ridge(alpha=RIDGE_ALPHA).fit(X[tr], Y[tr])
+        pred = _unit(m.predict(X[te]))
+        s_true = 1.0 - (pred * Y[te]).sum(-1)          # (n_te,)
+        oof[te] = s_true
+        s_decoy = 1.0 - pred @ Y[tr].T                 # (n_te, n_tr)
+        eligible = (X[te] @ X[tr].T) < DECOY_SIM_CAP   # dissimilar inputs only
+        margin = s_decoy - s_true[:, None]             # > 0 means the true output won
+        decisive = eligible & (np.abs(margin) > TIE_EPS)
+        wins += int((decisive & (margin > 0)).sum())
+        trials += int(decisive.sum())
+    return oof, wins, trials
+
+
 def _fit(step_profile_id: str) -> FittedModel:
     """Fit the profile's forward model from clean history. Mirrors the baseline
     hardening rules: successful, non-anomalous calls after the last evolution."""
@@ -111,8 +162,6 @@ def _fit(step_profile_id: str) -> FittedModel:
     prof = (db.table("step_profiles").select("role,last_evolved_at")
             .eq("id", step_profile_id).single().execute()).data or {}
     role = prof.get("role")
-    if role not in FIT_ROLES:
-        return _skip(f"role={role} not gated in", step_profile_id)
 
     q = (db.table("CALLS").select("prompt,output_code")
          .eq("step_profile_id", step_profile_id)
@@ -131,25 +180,30 @@ def _fit(step_profile_id: str) -> FittedModel:
         return _skip(f"n={len(pairs)} < {MIN_SAMPLES}", step_profile_id, n=len(pairs))
 
     from sklearn.linear_model import Ridge
-    from sklearn.model_selection import KFold
     from services.fingerprinter import _embed
 
     X = _unit(np.array([_embed(i) for i, _ in pairs]))
     Y = _unit(np.array([_embed(o) for _, o in pairs]))
 
-    # Out-of-fold surprise = honest residual distribution for the fence
-    # (in-sample residuals would understate normal surprise).
-    oof = np.zeros(len(X))
-    for tr, te in KFold(n_splits=5, shuffle=True, random_state=0).split(X):
-        m = Ridge(alpha=RIDGE_ALPHA).fit(X[tr], Y[tr])
-        pred = _unit(m.predict(X[te]))
-        oof[te] = 1.0 - (pred * Y[te]).sum(-1)
+    # Out-of-fold: the honest residual distribution for the fence (in-sample
+    # residuals would understate normal surprise), and the discrimination gate.
+    oof, wins, trials = _cross_validate(X, Y)
+
+    if trials < MIN_DECOY_TRIALS:
+        return _skip(f"only {trials} decoy comparisons (inputs too alike to "
+                     f"measure power)", step_profile_id, n=len(pairs))
+    win = wins / trials
+    if win < MIN_DECOY_WIN:
+        return _skip(f"discrimination {win:.0%} < {MIN_DECOY_WIN:.0%} over {trials} "
+                     f"decoys (role={role}) — no power, staying unfitted",
+                     step_profile_id, n=len(pairs))
 
     final = Ridge(alpha=RIDGE_ALPHA).fit(X, Y)
     fm = FittedModel(coef=final.coef_, intercept=final.intercept_,
-                     stat=_surprise_stat(list(oof)), fitted_at=time.time(), n=len(pairs))
+                     stat=_surprise_stat(list(oof)), fitted_at=time.time(),
+                     n=len(pairs), discrimination=win)
     log.info(f"[forward-model] fitted profile={step_profile_id} role={role} n={fm.n} "
-             f"surprise q1={fm.stat.q1:.3f} q3={fm.stat.q3:.3f}")
+             f"discrimination={win:.0%} surprise q1={fm.stat.q1:.3f} q3={fm.stat.q3:.3f}")
     return fm
 
 
@@ -170,8 +224,8 @@ def score_surprise(step_profile_id: str, raw_prompt: str | None,
                    output_text: str | None) -> tuple[float, MetricStat] | None:
     """Semantic surprise for one call, plus this step's surprise fence stats.
 
-    None when the profile has no usable model (cold start, role-gated out, no
-    output, or any failure) — the caller simply doesn't score 5010.
+    None when the profile has no usable model (cold start, gated out for weak
+    discrimination, no output, or any failure) — the caller doesn't score 5010.
     """
     try:
         inp = _user_text(raw_prompt)

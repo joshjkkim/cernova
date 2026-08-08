@@ -33,6 +33,7 @@ class _Q:
     def update(self, row):     self._mode = "update"; self._payload = row; return self
     def eq(self, *a, **k):     return self
     def gte(self, *a, **k):    return self
+    def in_(self, *a, **k):    return self
     def limit(self, *a, **k):  return self
     def order(self, *a, **k):  return self
 
@@ -110,6 +111,84 @@ def test_open_incident_past_cooldown_realerts():
     assert inc is not None
     assert inc.id == 9
     assert "last_alerted_at" in db.capture["update"]
+
+
+# --- auto-resolve ----------------------------------------------------------
+
+def _ago(minutes: float) -> str:
+    return (dt.datetime.now(dt.timezone.utc) - dt.timedelta(minutes=minutes)).isoformat()
+
+
+def _incident(**over) -> dict:
+    row = {"id": 9, "status": "open", "window_min": 10, "updated_at": _ago(1),
+           "last_alerted_at": _ago(1)}
+    row.update(over)
+    return row
+
+
+def _list(db):
+    with patch(f"{MOD}.get_client", return_value=db):
+        return sysmod.list_incidents("proj")
+
+
+def test_stale_incident_resolves_on_read():
+    # window 10 + grace 5 = 15; no refresh for 40 minutes -> the failure stopped.
+    db = FakeDB(run_ids=[], existing_incident=_incident(updated_at=_ago(40)))
+    rows = _list(db)
+    assert rows[0]["status"] == "resolved"
+    assert db.capture["update"]["status"] == "resolved"
+    assert "resolved_at" in db.capture["update"]
+
+
+def test_active_incident_survives_the_sweep():
+    db = FakeDB(run_ids=[], existing_incident=_incident(updated_at=_ago(2)))
+    rows = _list(db)
+    assert rows[0]["status"] == "open"
+    assert "update" not in db.capture          # nothing written
+
+
+def test_sweep_respects_the_incidents_own_window():
+    # A 60-minute window is still inside its grace at 40 minutes quiet.
+    db = FakeDB(run_ids=[], existing_incident=_incident(window_min=60, updated_at=_ago(40)))
+    assert _list(db)[0]["status"] == "open"
+
+
+def test_undated_incident_is_never_resolved():
+    db = FakeDB(run_ids=[], existing_incident=_incident(updated_at=None))
+    assert _list(db)[0]["status"] == "open"
+
+
+def test_already_resolved_is_left_alone():
+    db = FakeDB(run_ids=[], existing_incident=_incident(status="resolved", updated_at=_ago(40)))
+    _list(db)
+    assert "update" not in db.capture
+
+
+def test_recurrence_opens_a_new_incident():
+    # A stale open row must be closed and replaced, not re-alerted: a fresh
+    # outbreak deserves its own opened_at and its own alert.
+    db = FakeDB(run_ids=[f"r{i}" for i in range(7)],
+                existing_incident=_incident(updated_at=_ago(120), last_alerted_at=_ago(120)))
+    inc = _run(db)
+    assert db.capture["update"]["status"] == "resolved"   # old episode closed
+    assert "insert" in db.capture                          # new incident opened
+    assert inc is not None and inc.run_count == 7
+
+
+class _RaisesOnResolvedAt(_Q):
+    """Stands in for a DB where add_incident_resolution.sql hasn't been run."""
+    def execute(self):
+        if self._mode == "update" and "resolved_at" in (self._payload or {}):
+            raise RuntimeError('column "resolved_at" does not exist')
+        return super().execute()
+
+
+def test_resolve_degrades_without_the_migration():
+    db = FakeDB(run_ids=[], existing_incident=_incident(updated_at=_ago(40)))
+    db.table = lambda name: _RaisesOnResolvedAt(db.existing, db.capture, name)
+    rows = _list(db)
+    assert db.capture["update"] == {"status": "resolved"}   # retried without it
+    assert rows[0]["status"] == "resolved"
 
 
 # --- webhook event shape ---------------------------------------------------
